@@ -82,7 +82,8 @@ javac -nowarn -source 8 -target 8 -bootclasspath $JAR -d $HO/classes $(find $H/s
 $BT/d8 --lib $JAR --min-api 23 --output $HO/dex $(find $HO/classes -name '*.class')
 cp $HO/base.apk $HO/unsigned.apk && zip -q -j $HO/unsigned.apk $HO/dex/classes.dex
 # The helper carries adb for Android (helper/jniLibs, see helper/jniLibs/LADB-LICENSE.txt) as lib/<abi>/libadb.so.
-mkdir -p $HO/lib && cp -r $H/jniLibs/armeabi-v7a $HO/lib/ && (cd $HO && zip -q -r unsigned.apk lib)
+# (Left out of an emulator build: adb here is ARM only, and x86 emulators refuse an app with only ARM code.)
+case "$ABIS" in *386*|*amd64*) ;; *) mkdir -p $HO/lib && cp -r $H/jniLibs/armeabi-v7a $HO/lib/ && (cd $HO && zip -q -r unsigned.apk lib);; esac
 $BT/zipalign -f -p 4 $HO/unsigned.apk $HO/aligned.apk
 $BT/apksigner sign --ks "$KEYSTORE" --ks-pass pass:"$KS_PASS" --out out/assets/helper.apk $HO/aligned.apk || { echo "helper build failed"; exit 1; }
 rm -f out/assets/helper.apk.idsig

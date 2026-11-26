@@ -26,9 +26,13 @@ rm -f "$OUT/helper.apk"
 adb logcat -c
 say "start: $(sh am start -W -n $PKG/dev.ccrd.tv.MainActivity | grep -E 'Status|Error|TotalTime' | tr '\n' ' ')"
 sleep 20; shot 1-opened
+if ! alive; then      # a TV that just started may restart Google Play services, and Android closes apps using it
+  say "closed by Android: $(adb logcat -d | grep -m1 -o "Killing [0-9]*:$PKG.*" | cut -c1-160)"
+  sh am start -W -n $PKG/dev.ccrd.tv.MainActivity >/dev/null; sleep 20; shot 1-opened
+fi
 if alive; then say "open: ok"; else
   say "open: FAILED (the app isn't running)"; FAIL=1
-  adb logcat -d | grep -E "AndroidRuntime|$PKG|libgojni|DEBUG   :|Fatal signal" | tail -40 >> "$OUT/summary.txt"
+  adb logcat -d | grep -E "AndroidRuntime|$PKG|libgojni|DEBUG   :|Fatal signal" | tail -40 | cut -c1-300 >> "$OUT/summary.txt"
 fi
 say "in front: $(sh dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity' | grep -o '[a-z.]*/[A-Za-z.]*' | head -1)"
 
