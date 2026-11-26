@@ -48,7 +48,11 @@ addresses are private: never put them in this repository.
 - **A TV went dark** (the app is closed or the TV restarted, so it's off the private network) and there is a home
   box: `/opt/ccrd/tv-open.sh` opens the app on the TVs at home as a paired remote, through the home box. Once per TV:
   `tv-open.sh find`, `tv-open.sh pair <address>`, then `tv-open.sh code <address> <code on the TV>`. `tv-update.sh`
-  does this by itself when no TV answers. Try this before asking anyone to walk to a TV.
+  does this by itself when no TV answers.
+- **Before asking a person to touch a TV, try every route, in this order:** the app (port 6084) → the helper
+  (`/tv/helper`) → the home box (`tv-open.sh`; adb from the box for a TV with network debugging) → the other TV as
+  the way into the home network (SOCKS port, when its app is open) → only then the person. Check `tailscale status`
+  for what is online first; a missing Claude session on a machine doesn't mean the machine is unreachable.
 - Optional, only if the user has a home box and turned on the TV's debugging: adb from `CCRD_HOME_BOX` (it's on
   the home Wi-Fi, so not the home route) can press keys, restart or reinstall the app; a Wake-on-LAN packet sent
   from there turns on a TV with Remote start on. Without them, everything above still works.
