@@ -1,30 +1,32 @@
 <!doctype html><html><head><meta charset="utf-8"><style>
-/* The TV app's own screens, styled like Google TV's: plain white and grey on near-black, one thing per screen,
+/* Sizes are in rem: 1rem is 10px of a 1920-wide screen, whatever size the TV's browser reports.
+   The TV app's own screens, styled like Google TV's: plain white and grey on near-black, one thing per screen,
    text on the left, picture on the right, inside the TV's safe margins (5%). */
+html{font-size:calc(100vw / 192)}
 html,body{margin:0;height:100%;background:#131314;color:#e3e3e3;font-family:"Google Sans",Roboto,sans-serif}
-.frame{position:fixed;top:54px;right:96px;bottom:54px;left:96px;display:flex;flex-direction:column}
-.brand{height:52px;width:auto;align-self:flex-start;opacity:.9}
-.main{flex:1;display:flex;align-items:center;gap:96px}
-.text{flex:1;max-width:980px}
-.side{width:440px;display:flex;justify-content:center}
-h1{font-size:60px;line-height:1.15;margin:0 0 24px;font-weight:400;color:#f1f3f4}
-p{font-size:30px;line-height:1.45;margin:0 0 18px;color:#c4c7c5}
-ol{font-size:30px;line-height:1.6;margin:4px 0 22px;padding-left:44px;color:#e3e3e3}
+.frame{position:fixed;top:5.4rem;right:9.6rem;bottom:5.4rem;left:9.6rem;display:flex;flex-direction:column}
+.brand{height:5.2rem;width:auto;align-self:flex-start;opacity:.9}
+.main{flex:1;display:flex;align-items:center;gap:9.6rem}
+.text{flex:1;max-width:98rem}
+.side{width:44rem;display:flex;justify-content:center}
+h1{font-size:6rem;line-height:1.15;margin:0 0 2.4rem;font-weight:400;color:#f1f3f4}
+p{font-size:3rem;line-height:1.45;margin:0 0 1.8rem;color:#c4c7c5}
+ol{font-size:3rem;line-height:1.6;margin:0.4rem 0 2.2rem;padding-left:4.4rem;color:#e3e3e3}
 ol b{font-weight:500;color:#fff}
-.url{font-size:22px;color:#9aa0a6;word-break:break-all}
-.small{font-size:22px;color:#8e918f;margin-top:26px}
-#hint{font-size:26px;color:#c4c7c5;display:none}
-#qr{background:#fff;padding:24px;border-radius:16px;display:none}
-#qr img{display:block;width:400px;height:400px;image-rendering:pixelated}
+.url{font-size:2.2rem;color:#9aa0a6;word-break:break-all}
+.small{font-size:2.2rem;color:#8e918f;margin-top:2.6rem}
+#hint{font-size:2.6rem;color:#c4c7c5;display:none}
+#qr{background:#fff;padding:2.4rem;border-radius:1.6rem;display:none}
+#qr img{display:block;width:40rem;height:40rem;image-rendering:pixelated}
 #icon{display:none}
-#icon svg{width:200px;height:200px;fill:#dadce0;display:block}
-.spin{width:120px;height:120px;border-radius:50%;border:10px solid #3c4043;border-top-color:#e8eaed;
+#icon svg{width:20rem;height:20rem;fill:#dadce0;display:block}
+.spin{width:12rem;height:12rem;border-radius:50%;border:1rem solid #3c4043;border-top-color:#e8eaed;
   animation:spin 1.1s linear infinite;box-sizing:border-box}
 @keyframes spin{to{transform:rotate(360deg)}}
-#pin{display:none;gap:20px;margin:8px 0 22px}
-#pin span{width:88px;height:108px;border-radius:12px;background:#1f1f20;border:2px solid #3c4043;display:flex;
-  align-items:center;justify-content:center;font-size:52px;color:#f1f3f4}
-#pin span.cur{border:3px solid #e8eaed}
+#pin{display:none;gap:2rem;margin:0.8rem 0 2.2rem}
+#pin span{width:8.8rem;height:10.8rem;border-radius:1.2rem;background:#1f1f20;border:0.2rem solid #3c4043;display:flex;
+  align-items:center;justify-content:center;font-size:5.2rem;color:#f1f3f4}
+#pin span.cur{border:0.3rem solid #e8eaed}
 </style><script src="qrcode.js"></script></head><body><div class="frame">
 <img class="brand" src="logo-wide.png" alt="">
 <div class="main">
