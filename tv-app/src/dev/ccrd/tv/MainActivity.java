@@ -271,7 +271,7 @@ public class MainActivity extends Activity implements Runnable {
     private String current = null;
     private int misses = 0;
 
-    /** While the desktop is on screen: if it stops answering for about a minute (the cloud computer went to
+    /** While the desktop is on screen: if it stops answering for about half a minute (the cloud computer went to
      *  sleep), go back to the status screen, which reopens the desktop as soon as it is back. */
     private final Runnable watchdog = new Runnable() { public void run() {
         if (!opened) return;
@@ -282,7 +282,7 @@ public class MainActivity extends Activity implements Runnable {
                 if (!opened) return;
                 misses = ok ? 0 : misses + 1;
                 if (misses >= 2) { lost(); return; }
-                handler.postDelayed(watchdog, ok ? 30000 : 10000);
+                handler.postDelayed(watchdog, ok ? 15000 : 8000);
             } });
         } }, "watchdog").start();
     } };
