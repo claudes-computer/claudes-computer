@@ -8,7 +8,7 @@ APK=$1; OUT=${2:-lab-out}; mkdir -p "$OUT"
 [ -f "$APK" ] || { echo "usage: $0 <apk> [out dir]"; exit 2; }
 PKG=${PKG:-dev.ccrd.tv}; H=dev.ccrd.helper; FAIL=0      # PKG=... for a build under another app id
 # Every adb call has a time limit: an emulator that stops answering must not hang the whole run.
-adb(){ timeout "${T:-120}" command adb "$@"; }
+ADB=$(command -v adb); adb(){ timeout "${T:-120}" "$ADB" "$@"; }
 sh(){ adb shell "$@" 2>&1 | tr -d '\r'; }
 say(){ echo "$*" | tee -a "$OUT/summary.txt"; }
 shot(){ adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null; }
