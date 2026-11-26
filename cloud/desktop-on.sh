@@ -130,6 +130,10 @@ if [ ! -f /tmp/ccrd-warm ]; then
   touch /tmp/ccrd-warm
   (nice -n 19 ionice -c3 find /opt/google/chrome /opt/firefox /usr/lib/libreoffice /usr/lib/x86_64-linux-gnu \
      /usr/share/fonts /usr/share/icons -type f -size -200M -exec cat {} + >/dev/null 2>&1 &)
+  # The Local AI extra (if installed): its model takes minutes to load from a cold disk, so start it now, not on the
+  # first question.
+  [ -x /opt/llm/start.sh ] && ! curl -s --noproxy '*' -m 2 http://127.0.0.1:8088/v1/models >/dev/null && \
+    as bash -c 'mkdir -p ~/.cache; nice -n 10 nohup /opt/llm/bin/python -m llama_cpp.server --config_file /opt/llm/models.json > ~/.cache/local-ai.log 2>&1 &'
 fi
 for w in /opt/selkies/lib/python3*/site-packages/selkies/selkies_web/assets; do
   [ -f $D/tv/cc.apk ] && cp -u $D/tv/cc.apk $w/tv.apk; [ -f $D/tv/cc-old.apk ] && cp -u $D/tv/cc-old.apk $w/tv-old.apk
