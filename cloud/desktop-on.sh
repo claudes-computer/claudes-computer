@@ -124,6 +124,13 @@ SELKIES="/opt/selkies/bin/selkies --addr 127.0.0.1 --port 6081 --mode websockets
 # The TV app's installer file rides along with the stream's web pages, so a TV can fetch it with Downloader from
 # itself: http://127.0.0.1:16082/assets/tv.apk (through the running app; no laptop, nothing public).
 /opt/ccrd/patch-selkies-audio.sh >/dev/null 2>&1   # a sound cushion for Wi-Fi (see that file)
+# Snappy first launches: a machine that woke from a pause has lost its file cache, so each app's first start reads
+# it from a slow network disk (seconds). Read the big apps into memory once per wake, quietly in the background.
+if [ ! -f /tmp/ccrd-warm ]; then
+  touch /tmp/ccrd-warm
+  (nice -n 19 ionice -c3 find /opt/google/chrome /opt/firefox /usr/lib/libreoffice /usr/lib/x86_64-linux-gnu \
+     /usr/share/fonts /usr/share/icons -type f -size -200M -exec cat {} + >/dev/null 2>&1 &)
+fi
 for w in /opt/selkies/lib/python3*/site-packages/selkies/selkies_web/assets; do
   [ -f $D/tv/cc.apk ] && cp -u $D/tv/cc.apk $w/tv.apk; [ -f $D/tv/cc-old.apk ] && cp -u $D/tv/cc-old.apk $w/tv-old.apk
 done 2>/dev/null
