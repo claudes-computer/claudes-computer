@@ -31,7 +31,7 @@ py(){ $R/bin/python "$(dirname "$(readlink -f "$0")")/tv-remote.py" "$BOX" "$@";
 case "$1" in
   find) find_tvs;;
   pair) [ -n "$2" ] || { echo "usage: $0 pair TV-ADDRESS"; exit 2; }
-        (py "$2" pair > $R/pair-$2.log 2>&1; grep -q PAIRED $R/pair-$2.log && keep && touch $R/.kept) &
+        (py "$2" pair > $R/pair-$2.log 2>&1; grep -q PAIRED $R/pair-$2.log && keep && touch $R/.kept) >/dev/null 2>&1 </dev/null &
         for i in $(seq 1 30); do grep -q "CODE ON TV" $R/pair-$2.log 2>/dev/null && break; sleep 1; done
         grep -q "CODE ON TV" $R/pair-$2.log 2>/dev/null && echo "ON THE TV: a 6-character code is showing. Then: $0 code $2 <code>" || { echo "Pairing didn't start: $(tail -1 $R/pair-$2.log)"; exit 1; };;
   code) echo "$3" > $R/code-$2; for i in $(seq 1 20); do grep -q -E "PAIRED|Error|error" $R/pair-$2.log 2>/dev/null && break; sleep 1; done
