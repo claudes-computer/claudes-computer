@@ -1,7 +1,8 @@
 Third-party software in Claude's Computer
 =========================================
 
-The TV app includes the Go modules below (compiled in) and Kazuhiko Arase's QR Code Generator.
+The TV app includes the Go modules below (compiled in), Kazuhiko Arase's QR Code Generator, and adb (in the
+repair helper).
 Each one's license follows. The Go standard library is under the same license as golang.org/x/crypto.
 
 ----------------------------------------------------------------------
