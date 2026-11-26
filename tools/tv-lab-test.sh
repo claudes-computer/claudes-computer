@@ -7,12 +7,14 @@
 APK=$1; OUT=${2:-lab-out}; mkdir -p "$OUT"
 [ -f "$APK" ] || { echo "usage: $0 <apk> [out dir]"; exit 2; }
 PKG=${PKG:-dev.ccrd.tv}; H=dev.ccrd.helper; FAIL=0      # PKG=... for a build under another app id
+# Every adb call has a time limit: an emulator that stops answering must not hang the whole run.
+adb(){ timeout "${T:-120}" command adb "$@"; }
 sh(){ adb shell "$@" 2>&1 | tr -d '\r'; }
 say(){ echo "$*" | tee -a "$OUT/summary.txt"; }
 shot(){ adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null; }
 lps(){ sh dumpsys power | awk '/Low Power Standby Controller:/{p=1} p{print} p&&/mAllowedFeatures=|mAllowedReasons=/{n++} n>=1&&/^$/{exit}' | head -40; }
 alive(){ [ -n "$(sh pidof $PKG)" ]; }
-booted(){ adb wait-for-device; for i in $(seq 1 180); do [ "$(sh getprop sys.boot_completed)" = 1 ] && return 0; sleep 5; done; return 1; }
+booted(){ T=600 adb wait-for-device; for i in $(seq 1 180); do [ "$(sh getprop sys.boot_completed)" = 1 ] && return 0; sleep 5; done; return 1; }
 
 : > "$OUT/summary.txt"
 REL=$(sh getprop ro.build.version.release); SDK=$(sh getprop ro.build.version.sdk)
@@ -21,7 +23,9 @@ say "TV: $(sh getprop ro.product.model), Android $REL (API $SDK), $(sh getprop r
 # 1. Install and open
 unzip -p "$APK" assets/helper.apk > "$OUT/helper.apk" 2>/dev/null
 r=$(adb install -r "$APK" 2>&1 | tail -1); say "install app: $r"; case "$r" in *Success*) ;; *) exit 1;; esac
-if [ -s "$OUT/helper.apk" ]; then say "install helper: $(adb install -r "$OUT/helper.apk" 2>&1 | grep -v '^$' | tail -2 | tr '\n' ' ')"; fi
+if [ -s "$OUT/helper.apk" ]; then
+  r=$(adb install -r "$OUT/helper.apk" 2>&1; echo "exit $?"); say "install helper: $(echo "$r" | grep -v '^$' | tail -2 | tr '\n' ' ')"
+fi
 rm -f "$OUT/helper.apk"
 adb logcat -c
 say "start: $(sh am start -W -n $PKG/dev.ccrd.tv.MainActivity | grep -E 'Status|Error|TotalTime' | tr '\n' ' ')"
