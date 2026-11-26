@@ -144,10 +144,11 @@ public class MainActivity extends Activity implements Runnable {
         if (!away || !opened || steppedAside) return;
         hangUp("another app took the speakers");
     } };
-    /** Hang up: no sound, no stream, so the computer can sleep. Coming back to the app opens the desktop again. */
+    /** Hang up: no sound, no stream, so the computer can sleep. The app keeps running quietly so it stays on the
+     *  private network. Coming back to the app opens the desktop again. */
     private void hangUp(String why) {
         steppedAside = true;
-        KeepPlaying.stop(this);
+        KeepPlaying.start(this, true);                 // stay alive (and reachable) without sound or stream
         web.loadUrl("about:blank");
         android.util.Log.i("ClaudeDesktop", why + ": desktop stepped aside");
     }
