@@ -45,6 +45,10 @@ addresses are private: never put them in this repository.
   (Windows 11; it lets Ubuntu see the TV), run `wsl --shutdown`, then in Ubuntu install Tailscale and
   `sudo tailscale up --ssh`. Then set `CCRD_HOME_BOX=user@name` in `/opt/ccrd/ccrd.conf`, check
   `tailscale ssh $CCRD_HOME_BOX true`, and install adb there (`sudo apt install adb`; Mac: `brew install android-platform-tools`).
+- **A TV went dark** (the app is closed or the TV restarted, so it's off the private network) and there is a home
+  box: `/opt/ccrd/tv-open.sh` opens the app on the TVs at home as a paired remote, through the home box. Once per TV:
+  `tv-open.sh find`, `tv-open.sh pair <address>`, then `tv-open.sh code <address> <code on the TV>`. `tv-update.sh`
+  does this by itself when no TV answers. Try this before asking anyone to walk to a TV.
 - Optional, only if the user has a home box and turned on the TV's debugging: adb from `CCRD_HOME_BOX` (it's on
   the home Wi-Fi, so not the home route) can press keys, restart or reinstall the app; a Wake-on-LAN packet sent
   from there turns on a TV with Remote start on. Without them, everything above still works.

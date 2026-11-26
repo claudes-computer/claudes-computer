@@ -121,7 +121,7 @@ fi
 for s in desktop-on.sh keepawake.sh apply-look.sh fix-python-apps.sh \
          chrome.sh firefox.sh \
          tailscale-up.sh ts-join.sh home-route.sh tv-keep.sh wake-token.sh house-check.sh \
-         save.sh restore.sh chrome-db-check.py vault-password.sh a11y.py tv-update.sh claude-window.sh patch-selkies-audio.sh computer-name.sh tv-helper-setup.sh; do
+         save.sh restore.sh chrome-db-check.py vault-password.sh a11y.py tv-update.sh claude-window.sh patch-selkies-audio.sh computer-name.sh tv-helper-setup.sh tv-open.sh tv-remote.py; do
   install -m 755 "$HERE/$s" $D/$s
 done
 cp "$HERE/wallpaper.png" $D/wallpaper.png

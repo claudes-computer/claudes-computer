@@ -4,6 +4,10 @@
 # Usage: tv-update.sh [apk]      default: /opt/ccrd/tv/cc.apk (cc-old.apk for a TV whose app has an older id)
 D=/opt/ccrd; TS="$D/tailscale --socket=$D/ts.sock"
 c(){ env -u no_proxy -u NO_PROXY curl -s --socks5-hostname 127.0.0.1:1055 "$@"; }
+# No TV on the private network (the app is closed, or a TV restarted)? Open the app through the home computer first.
+if [ -z "$($D/tv-keep.sh tvs)" ] && grep -q '^CCRD_HOME_BOX=.' $D/ccrd.conf 2>/dev/null; then
+  echo "No TV is reachable; opening the app through the home computer..."; $D/tv-open.sh && sleep 25
+fi
 for ip in $($TS status --json | python3 -c '
 import json, sys
 for p in json.load(sys.stdin).get("Peer", {}).values():
