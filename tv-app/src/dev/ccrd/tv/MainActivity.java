@@ -73,6 +73,7 @@ public class MainActivity extends Activity implements Runnable {
         root.addView(web);
         picker = new ComputerPicker(this, root, handler);
         sound = new BackgroundSound(this, handler, speakersLost);
+        registerReceiver(screenOff, new android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF));
         // Small pills in the top-right corner: Claude's notice, and the microphone while it's on.
         android.widget.LinearLayout pills = new android.widget.LinearLayout(this);
         pills.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -141,11 +142,25 @@ public class MainActivity extends Activity implements Runnable {
     private BackgroundSound sound;
     private final Runnable speakersLost = new Runnable() { public void run() {
         if (!away || !opened || steppedAside) return;
-        steppedAside = true;
-        KeepPlaying.stop(MainActivity.this);
-        web.loadUrl("about:blank");                               // hang up: no sound, no stream
-        android.util.Log.i("ClaudeDesktop", "another app took the speakers: desktop stepped aside");
+        hangUp("another app took the speakers");
     } };
+    /** Hang up: no sound, no stream, so the computer can sleep. Coming back to the app opens the desktop again. */
+    private void hangUp(String why) {
+        steppedAside = true;
+        KeepPlaying.stop(this);
+        web.loadUrl("about:blank");
+        android.util.Log.i("ClaudeDesktop", why + ": desktop stepped aside");
+    }
+    /** Power off is "goodnight", not "keep playing in the background": hang up, even if the desktop was playing
+     *  sound behind another app. The app itself stays on the private network, so Claude can still reach the TV. */
+    private final android.content.BroadcastReceiver screenOff = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context c, android.content.Intent i) {
+            if (opened && !steppedAside) { away = true; hangUp("the TV turned off"); }
+        }
+    };
+    private boolean screenIsOn() {
+        return ((android.os.PowerManager) getSystemService(POWER_SERVICE)).isInteractive();
+    }
 
     private final Runnable heartbeat = new Runnable() { public void run() {
         HelperLink.beat(MainActivity.this, true);
@@ -155,7 +170,16 @@ public class MainActivity extends Activity implements Runnable {
     @Override protected void onStop() {
         super.onStop();
         handler.removeCallbacks(heartbeat); HelperLink.beat(this, false);
-        if (opened && !steppedAside) { away = true; sound.take(); KeepPlaying.start(this); }
+        if (opened && !steppedAside) {
+            away = true;
+            if (!screenIsOn()) hangUp("the TV turned off");
+            else { sound.take(); KeepPlaying.start(this); }
+        }
+    }
+
+    @Override protected void onDestroy() {
+        try { unregisterReceiver(screenOff); } catch (Exception e) { }
+        super.onDestroy();
     }
 
     @Override protected void onStart() {

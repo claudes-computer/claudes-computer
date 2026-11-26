@@ -64,6 +64,11 @@ addresses are private: never put them in this repository.
   Afterwards (POST `http://<TV>:6084/tv/helper?do=...` through the SOCKS port; the TV shows a notice each time):
   `do=keys&arg=key:<android keycode>,link:<uri>`, `do=power`, `do=shell&arg=<command>` (adb's shell user: input, pm,
   settings, dumpsys). Wireless debugging switches off when the TV restarts; the person turns it back on, no new pairing.
+  Setup ends with `tv-helper-setup.sh <TV> tune` (run it again any time): pairing never expires, the helper may open
+  the app directly, and on Android 13+ the app and helper stay exempt from the standby network cut-off (applies at the
+  TV's next restart). Every change and its undo go in `/opt/ccrd/tv/tuneup-<TV>.txt`.
+- **Does a TV stay reachable when it's off?** `/opt/ccrd/tv-standby-test.sh <TV> [minutes]`, then the person turns
+  it off with the remote; it ends with a verdict.
 - **"Tune up my TV"** (needs the terminal): look first, then ask before changing. Only reversible changes:
   `pm disable-user --user 0 <app>` (never uninstall system apps), `settings put` with the old value noted, the TV's own
   menus through keys. Keep a list of every change and its undo in `/opt/ccrd/tv/tuneup-<TV>.txt` and tell the person.

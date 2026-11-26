@@ -66,7 +66,7 @@ public class HelperService extends Service {
                     if (prefs.getBoolean("paired", false)) {
                         for (int t = 0; t < 4; t++) {
                             Thread.sleep(t == 0 ? 20000 : 15000);
-                            try { disguised(OPEN_APP); android.util.Log.i(TAG, "boot: opened the app"); break; }
+                            try { openApp(); android.util.Log.i(TAG, "boot: opened the app"); break; }
                             catch (Exception e) { android.util.Log.w(TAG, "boot: " + e); }
                         }
                     }
@@ -80,16 +80,18 @@ public class HelperService extends Service {
     // ---- watchdog: the app says "front" every 30 s while it is on screen and "away" when the person leaves it.
     // If it was in front and goes silent (it crashed, or Android closed it), open it again. Up to 3 tries. ----
     private static boolean watching = false;
-    private static long lastBeat = 0;
+    private static volatile long lastBeat = 0;
     private static int tries = 0;
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable watch = new Runnable() { public void run() {
         if (!watching) return;
+        // A TV that was turned off isn't a crashed app: never reopen (and so wake) a sleeping TV.
+        if (!screenIsOn()) { lastBeat = System.currentTimeMillis(); main.postDelayed(this, 30000); return; }
         if (System.currentTimeMillis() - lastBeat > 90000 && tries < 3 && prefs.getBoolean("paired", false)) {
             tries++; lastBeat = System.currentTimeMillis();
             android.util.Log.i(TAG, "the app went silent: opening it again (try " + tries + ")");
             new Thread(new Runnable() { public void run() {
-                try { disguised(OPEN_APP); } catch (Exception e) { android.util.Log.w(TAG, "reopen: " + e); }
+                try { openApp(); } catch (Exception e) { android.util.Log.w(TAG, "reopen: " + e); }
             } }, "reopen").start();
         }
         main.postDelayed(this, 30000);
@@ -169,6 +171,26 @@ public class HelperService extends Service {
         }
     }
 
+    private boolean screenIsOn() {
+        return ((android.os.PowerManager) getSystemService(POWER_SERVICE)).isInteractive();
+    }
+
+    /** Opens the main app. With "display over other apps" (granted once through adb: appops set dev.ccrd.helper
+     *  SYSTEM_ALERT_WINDOW allow), Android lets the helper open it directly; otherwise, or if Android quietly
+     *  refused, press it open as the TV's remote. The app says "front" (heartbeat) when it is on screen. */
+    private void openApp() throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 23 && android.provider.Settings.canDrawOverlays(this)) {
+            long asked = System.currentTimeMillis();
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("claudescomputer://open"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                for (int i = 0; i < 20; i++) { Thread.sleep(500); if (lastBeat >= asked) return; }
+                android.util.Log.i(TAG, "opened directly but the app didn't answer: pressing it open instead");
+            } catch (Exception e) { android.util.Log.i(TAG, "open directly: " + e); }
+        }
+        disguised(OPEN_APP);
+    }
+
     /** Runs remote actions through the disguise (LoopVpn): the TV refuses remote control from itself, so the
      *  connection goes to a made-up address and arrives at the TV from a made-up sender. */
     private void disguised(String... actions) throws Exception {
@@ -202,7 +224,7 @@ public class HelperService extends Service {
                 while (System.currentTimeMillis() < until && updatedAt(pkg) == before) Thread.sleep(2000);
                 if (updatedAt(pkg) == before) { android.util.Log.w(TAG, "update didn't go in"); return; }
                 Thread.sleep(3000);
-                disguised(OPEN_APP);
+                openApp();
                 android.util.Log.i(TAG, "updated and reopened " + pkg);
             } catch (Exception e) { android.util.Log.w(TAG, "install: " + e); }
             finally { new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() { public void run() { release(); } }); }

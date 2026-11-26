@@ -6,6 +6,9 @@
 #                                                          Developer options > Wireless debugging > Pair device with pairing code
 #   tv-helper-setup.sh [IP] code <6 characters>            the remote-pairing code the TV shows (TVs without the terminal)
 #   tv-helper-setup.sh [IP] basic                          skip the terminal on a TV that could have it
+#   tv-helper-setup.sh [IP] tune                           (again) the settings the helper needs; part of every
+#                                                          setup with the terminal. Each change and its undo goes in
+#                                                          /opt/ccrd/tv/tuneup-<TV>.txt
 D=/opt/ccrd; TS="$D/tailscale --socket=$D/ts.sock"
 c(){ env -u no_proxy -u NO_PROXY curl -s --socks5-hostname 127.0.0.1:1055 "$@"; }
 case "$1" in 100.*) IP=$1; shift;; *) IP=$($TS status --json | python3 -c '
@@ -26,6 +29,53 @@ summary(){
   if [ $term = yes ]; then echo "  yes  command line (settings, screenshots, logs, silent installs) while wireless debugging is on"
   elif [ "$ANDROID" -ge 11 ]; then echo "  no   command line: turn on Developer options > Wireless debugging, then run this with: terminal <code> <port>"
   else echo "  no   command line (needs Android 11 or newer)"; fi
+}
+
+
+# The settings that keep the app reachable and the helper able to help, each noted with its undo. Needs the terminal.
+tune(){
+  local log=$D/tv/tuneup-$MODEL.txt old cur
+  note(){ echo "$(date '+%F %H:%M')  $1   | undo: $2" >> "$log"; echo "  changed: $1"; }
+  t(){ sh "$1" | tr -d '\r'; }
+  # Wireless debugging forgets a pairing after 7 days without use.
+  old=$(t 'settings get global adb_allowed_connection_time' | tr -d '\n')
+  if [ "$old" != 0 ]; then
+    t 'settings put global adb_allowed_connection_time 0' >/dev/null
+    if [ "$old" = null ]; then note "wireless debugging pairing never expires" "settings delete global adb_allowed_connection_time"
+    else note "wireless debugging pairing never expires (was $old)" "settings put global adb_allowed_connection_time $old"; fi
+  fi
+  # The helper turns wireless debugging back on after a restart.
+  if ! t 'dumpsys package dev.ccrd.helper' | grep -q 'WRITE_SECURE_SETTINGS: granted=true'; then
+    t 'pm grant dev.ccrd.helper android.permission.WRITE_SECURE_SETTINGS' >/dev/null
+    note "helper may change system settings (turns wireless debugging back on after a restart)" "pm revoke dev.ccrd.helper android.permission.WRITE_SECURE_SETTINGS"
+  fi
+  # The helper opens the app directly (Android blocks background apps from opening screens otherwise).
+  if ! t 'appops get dev.ccrd.helper SYSTEM_ALERT_WINDOW' | grep -q allow; then
+    t 'appops set dev.ccrd.helper SYSTEM_ALERT_WINDOW allow' >/dev/null
+    note "helper may open the app directly (display over other apps)" "appops set dev.ccrd.helper SYSTEM_ALERT_WINDOW default"
+  fi
+  # Android 13+ TVs (Low Power Standby, the "Energy modes" setting): seconds after the TV turns off, every app that
+  # isn't on screen loses the network, so the app drops off the private network. The Energy mode's list of exempt
+  # apps can be extended through a device setting that TV Settings reads at every start.
+  [ "$ANDROID" -ge 13 ] || return 0
+  local lps; lps=$(t 'dumpsys power' | awk '/Low Power Standby Controller:/{p=1} p&&/=/{print} /mAllowedReasons=/{exit}')
+  v(){ echo "$lps" | sed -n "s/^ *$1=//p" | head -1; }
+  if [ "$(v mSupportedConfig)" != true ] || [ "$(v mIsEnabled)" != true ]; then echo "  standby: this TV doesn't cut apps off the network"; return 0; fi
+  if [ "$(v mEnableCustomPolicy)" != true ]; then
+    t 'settings put global low_power_standby_enabled 0' >/dev/null
+    note "standby network cut-off off (this TV has no exempt list; comes back on at a restart)" "settings put global low_power_standby_enabled 1"
+    return 0
+  fi
+  local id pk; id=$(v mIdentifier); pk=$(v mExemptPackages)
+  case ",$pk," in *",$PKG,"*) case ",$pk," in *",dev.ccrd.helper,"*) echo "  standby: the app and the helper are already exempt ($id)"; return 0;; esac;; esac
+  [ -n "$id" ] || { echo "  standby: couldn't read the Energy mode; nothing changed"; return 0; }
+  old=$(t "cmd device_config get low_power_standby policy_${id}_exempt_packages" | tr -d '\n')
+  cur=$(echo "$pk,$PKG,dev.ccrd.helper" | tr ',' '\n' | grep -v '^$' | sort -u | paste -sd,)
+  t "cmd device_config put low_power_standby policy_${id}_exempt_packages $cur" >/dev/null
+  if [ "$old" = null ] || [ -z "$old" ]; then note "standby: the app and the helper keep the network (Energy mode $id)" "cmd device_config delete low_power_standby policy_${id}_exempt_packages"
+  else note "standby: the app and the helper keep the network (Energy mode $id; was $old)" "cmd device_config put low_power_standby policy_${id}_exempt_packages $old"; fi
+  echo "  standby: takes effect when the TV restarts (or the Energy mode is chosen again in Settings)."
+  echo "           To apply now: restart the TV (it comes back to the app by itself if the helper is paired)."
 }
 
 st=$(h status)
@@ -49,6 +99,10 @@ if [ $term = no ] && [ "$ANDROID" -ge 11 ] && [ "$1" != basic ] && [ "$1" != cod
   exit 0
 fi
 
+if [ "$1" = tune ]; then
+  [ $term = yes ] || { echo "Tuning needs the command line (wireless debugging on, and paired)."; exit 1; }
+  tune; exit 0
+fi
 if [ $term = yes ]; then
   sh "appops set $PKG REQUEST_INSTALL_PACKAGES allow; appops set dev.ccrd.helper ACTIVATE_VPN allow" >/dev/null
   if [ "$st" != paired ]; then
@@ -58,7 +112,7 @@ if [ $term = yes ]; then
     [ -z "$code" ] && { echo "Couldn't read the code on the TV. Ask the person for it: $0 $IP code <code>"; exit 0; }
     r=$(h code "$code"); [ "$r" = ok ] || { echo "Remote pairing failed: $r"; exit 1; }
   fi
-  summary; exit 0
+  tune; summary; exit 0
 fi
 
 # Without the terminal: the person presses OK on the VPN question and reads out the pairing code.

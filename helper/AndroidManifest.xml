@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- Granted only through adb (tv-helper-setup.sh), to turn wireless debugging back on after a restart. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
+    <!-- "Display over other apps", granted through adb: lets the helper open the main app directly. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <application android:label="Claude's Computer helper" android:allowBackup="false" android:extractNativeLibs="true">
