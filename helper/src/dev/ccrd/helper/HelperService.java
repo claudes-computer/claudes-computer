@@ -55,7 +55,11 @@ public class HelperService extends Service {
 
     @Override public int onStartCommand(Intent i, int flags, int id) {
         if (i != null && BOOT.equals(i.getAction())) {
-            // The TV just started (BootReceiver): wait for the network, then open the app as the TV's remote.
+            // The TV just started (BootReceiver): wireless debugging switches itself off at every restart; turn it
+            // back on (allowed once through adb: pm grant dev.ccrd.helper android.permission.WRITE_SECURE_SETTINGS).
+            // Then wait for the network and open the app as the TV's remote.
+            try { android.provider.Settings.Global.putInt(getContentResolver(), "adb_wifi_enabled", 1); }
+            catch (Exception e) { android.util.Log.i(TAG, "boot: can't turn on wireless debugging (" + e + ")"); }
             hold();
             new Thread(new Runnable() { public void run() {
                 try {

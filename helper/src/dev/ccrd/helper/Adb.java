@@ -59,11 +59,38 @@ final class Adb {
     /** Connects to the TV's wireless debugging; returns the device's adb name. */
     String connect() throws Exception {
         String port = find("_adb-tls-connect._tcp");
-        if (port == null) throw new Exception("wireless debugging isn't on (Developer options > Wireless debugging)");
-        String target = "127.0.0.1:" + port;
-        String r = run(null, 30, "connect", target);
-        if (!r.contains("connected")) throw new Exception("adb connect: " + r.trim());
-        return target;
+        if (port != null) {
+            String target = "127.0.0.1:" + port;
+            String r = run(null, 30, "connect", target);
+            if (r.contains("connected")) return target;
+        }
+        // The TV doesn't always announce it (after a restart it sometimes doesn't): look for the port ourselves.
+        // Wireless debugging listens on a random port from 30000 up; only it answers adb's handshake.
+        for (int p : openPorts(30000, 50000)) {
+            String target = "127.0.0.1:" + p;
+            String r = run(null, 8, "connect", target);
+            if (r.contains("connected") && run(null, 10, "-s", target, "shell", "echo ok").trim().equals("ok")) return target;
+            run(null, 5, "disconnect", target);
+        }
+        throw new Exception("wireless debugging isn't on (Developer options > Wireless debugging)");
+    }
+
+    /** The TCP ports open on this TV between from and to (connections to the TV itself fail fast when closed). */
+    private static java.util.List<Integer> openPorts(int from, int to) throws Exception {
+        final java.util.List<Integer> open = java.util.Collections.synchronizedList(new ArrayList<Integer>());
+        java.util.concurrent.ExecutorService ex = java.util.concurrent.Executors.newFixedThreadPool(64);
+        for (int p = from; p < to; p++) {
+            final int port = p;
+            ex.execute(new Runnable() { public void run() {
+                java.net.Socket s = new java.net.Socket();
+                try { s.connect(new java.net.InetSocketAddress("127.0.0.1", port), 200); open.add(port); }
+                catch (Exception e) { }
+                finally { try { s.close(); } catch (Exception e) { } }
+            } });
+        }
+        ex.shutdown(); ex.awaitTermination(30, TimeUnit.SECONDS);
+        java.util.Collections.sort(open);
+        return open;
     }
 
     /** The port of a service this TV announces on the network (this TV's own addresses only). */
