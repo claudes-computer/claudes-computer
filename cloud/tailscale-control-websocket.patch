@@ -1,0 +1,124 @@
+For machines behind an HTTP proxy that intercepts TLS and refuses Tailscale's protocol upgrades but allows
+WebSockets (seen in another AI agent's sandbox: CONNECT works, then 403 on POST /ts2021). Tailscale 1.106+.
+- Control: after the normal dial fails with "unexpected HTTP response", connect over WebSocket, as the browser
+  (js/wasm) client always does. TS_CONTROL_WEBSOCKET=1 tries it first. Noise still runs inside.
+- DERP: links in Tailscale's own opt-in feature/derpwebsocket, which falls back to WebSockets the same way.
+Tested 2026-11-26 against controlplane.tailscale.com: "controlhttp: connected over WebSocket", login link issued.
+Apply: cd tailscale-src && patch -p1 < tailscale-control-websocket.patch; run tailscaled with HTTPS_PROXY set.
+
+diff -ruN -x 'tailscale*-ws' ts-ws.orig/cmd/tailscaled/derpwebsocket.go ts-ws/cmd/tailscaled/derpwebsocket.go
+--- a/cmd/tailscaled/derpwebsocket.go	1969-12-31 16:00:00.000000000 -0800
++++ b/cmd/tailscaled/derpwebsocket.go	2026-11-26 13:35:08.228037710 -0800
+@@ -0,0 +1,9 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++//go:build !js
++
++package main
++
++// DERP inside WebSockets when a TLS-intercepting proxy refuses DERP's own upgrade (see feature/derpwebsocket).
++import _ "tailscale.com/feature/derpwebsocket"
+diff -ruN -x 'tailscale*-ws' ts-ws.orig/control/controlhttp/client.go ts-ws/control/controlhttp/client.go
+--- a/control/controlhttp/client.go	2026-11-26 13:35:07.833965874 -0800
++++ b/control/controlhttp/client.go	2026-11-26 13:35:08.224136548 -0800
+@@ -68,7 +68,19 @@
+ 	if a.Hostname == "" {
+ 		return nil, errors.New("required Dialer.Hostname empty")
+ 	}
+-	return a.dial(ctx)
++	if controlWebsocketFirst() {
++		return a.dialWebsocket(ctx)
++	}
++	c, err := a.dial(ctx)
++	if wantsWebsocketFallback(err) {
++		a.logf("controlhttp: protocol upgrade refused (%v); trying WebSocket", err)
++		if wc, werr := a.dialWebsocket(ctx); werr == nil {
++			return wc, nil
++		} else {
++			a.logf("controlhttp: WebSocket failed too: %v", werr)
++		}
++	}
++	return c, err
+ }
+ 
+ func (a *Dialer) logf(format string, args ...any) {
+diff -ruN -x 'tailscale*-ws' ts-ws.orig/control/controlhttp/client_ws.go ts-ws/control/controlhttp/client_ws.go
+--- a/control/controlhttp/client_ws.go	1969-12-31 16:00:00.000000000 -0800
++++ b/control/controlhttp/client_ws.go	2026-11-26 13:35:08.160520728 -0800
+@@ -0,0 +1,75 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++//go:build !js
++
++package controlhttp
++
++// A WebSocket fallback for the control connection, for machines behind an HTTP proxy that intercepts TLS and
++// refuses Tailscale's own protocol upgrade (POST /ts2021, "Upgrade: tailscale-control-protocol") but allows
++// WebSockets, as in some sandboxes for AI agents. It is the transport the js/wasm client always uses
++// (client_js.go), and control servers already accept it. The Noise protocol runs inside, so an intercepting
++// proxy still can't read or change the conversation.
++//
++// It's tried after the normal dial fails, or first with TS_CONTROL_WEBSOCKET=1.
++
++import (
++	"context"
++	"encoding/base64"
++	"net"
++	"net/http"
++	"net/url"
++	"strings"
++
++	"github.com/coder/websocket"
++	"tailscale.com/control/controlbase"
++	"tailscale.com/control/controlhttp/controlhttpcommon"
++	"tailscale.com/envknob"
++	"tailscale.com/net/wsconn"
++)
++
++var controlWebsocketFirst = envknob.RegisterBool("TS_CONTROL_WEBSOCKET")
++
++// wantsWebsocketFallback reports whether err looks like a proxy refusing the protocol upgrade.
++func wantsWebsocketFallback(err error) bool {
++	return err != nil && strings.Contains(err.Error(), "unexpected HTTP response")
++}
++
++func (a *Dialer) dialWebsocket(ctx context.Context) (*ClientConn, error) {
++	init, cont, err := controlbase.ClientDeferred(a.MachineKey, a.ControlKey, a.ProtocolVersion)
++	if err != nil {
++		return nil, err
++	}
++	host := a.Hostname
++	if a.HTTPSPort != "" && a.HTTPSPort != "443" && a.HTTPSPort != NoPort {
++		host = net.JoinHostPort(host, a.HTTPSPort)
++	}
++	u := &url.URL{
++		Scheme: "wss",
++		Host:   host,
++		Path:   serverUpgradePath,
++		RawQuery: url.Values{
++			controlhttpcommon.HandshakeHeaderName: []string{base64.StdEncoding.EncodeToString(init)},
++		}.Encode(),
++	}
++	proxy := a.getProxyFunc()
++	if proxy == nil {
++		proxy = http.ProxyFromEnvironment
++	}
++	hc := &http.Client{Transport: &http.Transport{Proxy: proxy, ForceAttemptHTTP2: false}}
++	ws, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{
++		Subprotocols: []string{controlhttpcommon.UpgradeHeaderValue},
++		HTTPClient:   hc,
++	})
++	if err != nil {
++		return nil, err
++	}
++	nc := wsconn.NetConn(context.Background(), ws, websocket.MessageBinary, u.String())
++	cc, err := cont(ctx, nc)
++	if err != nil {
++		nc.Close()
++		return nil, err
++	}
++	a.logf("controlhttp: connected over WebSocket")
++	return &ClientConn{Conn: cc}, nil
++}
