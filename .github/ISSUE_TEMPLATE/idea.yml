@@ -1,0 +1,10 @@
+name: Idea
+description: Something you'd like it to do
+labels: [idea]
+body:
+  - type: textarea
+    attributes:
+      label: What would you like?
+      description: What you're trying to do at the TV, and what would make it easier.
+    validations:
+      required: true

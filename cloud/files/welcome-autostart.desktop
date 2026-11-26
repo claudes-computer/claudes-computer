@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome (first start)
+Exec=/opt/ccrd/welcome/welcome.py --first-run
+X-XFCE-Autostart-Override=true

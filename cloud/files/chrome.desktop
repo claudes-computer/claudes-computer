@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Chrome
+Comment=Browse through your home connection
+Exec=/opt/ccrd/chrome.sh %U
+Icon=google-chrome
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;

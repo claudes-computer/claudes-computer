@@ -1,0 +1,17 @@
+name: Bug
+description: Something isn't working
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected. A photo of the TV helps.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: TV and app version
+      description: e.g. a TCL or Hisense Google TV, or a Chromecast; app version from the TV's app info screen
+  - type: markdown
+    attributes:
+      value: Don't paste tokens, PINs, keys or home addresses. Security problems go through SECURITY.md instead.

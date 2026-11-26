@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome
+Comment=A quick tour of your computer
+Exec=/opt/ccrd/welcome/welcome.py
+Icon=/opt/ccrd/welcome/logo.png
+Categories=System;

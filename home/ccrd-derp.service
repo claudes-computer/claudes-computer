@@ -1,0 +1,12 @@
+[Unit]
+Description=Claude's Computer: own Tailscale relay (derper) for full-speed streaming
+After=network-online.target
+[Service]
+EnvironmentFile=%h/.config/ccrd/derp.env
+# Tailscale queues only 32 packets per client by default; bursts past that are dropped and TCP slows to a crawl.
+Environment=TS_DEBUG_DERP_PER_CLIENT_SEND_QUEUE_DEPTH=1024
+ExecStart=%h/.local/bin/ccrd-derper -a :443 -http-port -1 -stun-port 3478 -hostname ${DERP_HOST} -c %h/.config/ccrd/derper.key -certdir %h/.local/share/ccrd-derp -verify-clients
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=default.target

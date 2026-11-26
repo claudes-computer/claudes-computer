@@ -1,0 +1,11 @@
+--- a/net/dns/resolver/tsdns.go
++++ b/net/dns/resolver/tsdns.go
+@@ -591,7 +591,7 @@
+ 
+ 	r := resolver
+ 	if r == nil {
+-		r = new(net.Resolver)
++		r = net.DefaultResolver // ccrd patch: on Android the app sets DefaultResolver (no resolv.conf)
+ 	}
+ 	name := resp.Question.Name.String()
+ 

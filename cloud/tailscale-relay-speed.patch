@@ -1,0 +1,67 @@
+--- a/wgengine/magicsock/derp.go	2026-11-23 18:04:17.322510038 -0800
++++ b/wgengine/magicsock/derp.go	2026-11-23 18:04:17.485432587 -0800
+@@ -326,7 +326,7 @@
+ // line into a socket TCP buffer. The challenge at present is that connect and
+ // reconnect are in the write path and we don't want to block other write
+ // operations on those.
+-const derpWriteQueueDepth = 32
++const derpWriteQueueDepth = 1024
+ 
+ // derpWriteChanForRegion returns a channel to which to send DERP packet write
+ // requests. It creates a new DERP connection to regionID if necessary.
+diff -ru a/derp/derp_client.go b/derp/derp_client.go
+--- a/derp/derp_client.go	2026-11-23 18:04:17.169145649 -0800
++++ b/derp/derp_client.go	2026-11-23 18:12:00.774745380 -0800
+@@ -37,6 +37,8 @@
+ 
+ 	wmu  sync.Mutex // hold while writing to bw
+ 	bw   *bufio.Writer
++	// flushPending is set while a delayed flush is scheduled (ccrd patch: batch packet writes).
++	flushPending bool
+ 	rate *rate.Limiter // if non-nil, rate limiter to use
+ 
+ 	// Owned by Recv:
+@@ -284,7 +286,21 @@
+ 	if _, err := c.bw.Write(pkt); err != nil {
+ 		return err
+ 	}
+-	return c.bw.Flush()
++	// ccrd patch: instead of one flush (one TLS record, one proxy write) per packet,
++	// let packets collect for a fraction of a millisecond and flush them together.
++	if c.bw.Buffered() >= 48<<10 {
++		return c.bw.Flush()
++	}
++	if !c.flushPending {
++		c.flushPending = true
++		time.AfterFunc(300*time.Microsecond, func() {
++			c.wmu.Lock()
++			defer c.wmu.Unlock()
++			c.flushPending = false
++			c.bw.Flush()
++		})
++	}
++	return nil
+ }
+ 
+ // ForwardPacket sends a forward packet frame carrying pkt from srcKey
+diff -ru a/derp/derphttp/derphttp_client.go b/derp/derphttp/derphttp_client.go
+--- a/derp/derphttp/derphttp_client.go	2026-11-23 18:04:17.169444570 -0800
++++ b/derp/derphttp/derphttp_client.go	2026-11-23 18:12:00.775378543 -0800
+@@ -413,7 +413,7 @@
+ 			c.logf("%s: websocket to %v error: %v", caller, urlStr, err)
+ 			return nil, 0, err
+ 		}
+-		brw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
++		brw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriterSize(conn, 64<<10))
+ 		derpClient, err := derp.NewClient(c.privateKey, conn, brw, c.logf,
+ 			derp.MeshKey(c.MeshKey),
+ 			derp.CanAckPings(c.canAckPings),
+@@ -505,7 +505,7 @@
+ 		httpConn = tcpConn
+ 	}
+ 
+-	brw := bufio.NewReadWriter(bufio.NewReader(httpConn), bufio.NewWriter(httpConn))
++	brw := bufio.NewReadWriter(bufio.NewReader(httpConn), bufio.NewWriterSize(httpConn, 64<<10))
+ 	var derpClient *derp.Client
+ 
+ 	req, err := http.NewRequest("GET", c.urlString(node), nil)

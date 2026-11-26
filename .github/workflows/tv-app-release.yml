@@ -1,0 +1,56 @@
+# Builds the TV app and publishes it as a GitHub release. Runs only when started by hand (Actions -> TV app release ->
+# Run workflow): releases are usually made with the APK built and signed on the desktop, and a run on every tag would
+# race those. The signed APK is what TVs accept as an update; see the signing note below.
+# Signing: add repository secrets TV_KEYSTORE_B64 (base64 of the keystore) and TV_KS_PASS. Without them the
+# build makes a throwaway key, and a TV that has an earlier build must uninstall it before installing this one.
+name: TV app release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0-alpha (creates tag v1.0-alpha). Leave empty to only build."
+        required: false
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"   # downloads the exact version go.mod asks for
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.TV_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No TV_KEYSTORE_B64 secret: signing with a throwaway key."
+          fi
+      - name: Build
+        env:
+          KS_PASS: ${{ secrets.TV_KS_PASS }}
+        run: bash tv-app/build.sh
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          V=${VERSION:-${GITHUB_REF_NAME#v}}
+          # Two names for the same file: the README's link (releases/latest/download/claudes-computer.apk) always
+          # gets the newest, and the versioned one stays findable.
+          cp tv-app/out/claudes-computer.apk "claudes-computer-$V.apk"
+          gh release create "v$V" tv-app/out/claudes-computer.apk "claudes-computer-$V.apk" --target "$GITHUB_SHA" --title "Claude's Computer $V" \
+            --notes "Install with a downloader app on your Google TV / Android TV, open it, and scan the QR code with your phone."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claudes-computer-apk
+          path: tv-app/out/claudes-computer.apk

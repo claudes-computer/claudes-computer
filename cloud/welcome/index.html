@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Welcome</title>
+<style>
+:root{--bg:#16191d;--card:#1f242a;--line:#2c333b;--text:#e8e6dc;--dim:#a9b0b9;--accent:#e8956b;--accent2:#7fd6d0}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:17px/1.5 Ubuntu,system-ui,sans-serif}
+.app{height:100%;display:flex;flex-direction:column;padding:34px 44px 26px}
+.top{display:flex;align-items:center;gap:14px;color:var(--dim);font-size:15px}
+.top img{height:64px;width:auto;display:block}
+.dots{margin-left:auto;display:flex;gap:8px}
+.dots i{width:9px;height:9px;border-radius:50%;background:var(--line)}
+.dots i.on{background:var(--accent)}
+.page{display:none;flex:1;overflow:auto;padding-top:18px}
+.page.on{display:block;animation:in .25s ease}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+h1{font-size:34px;line-height:1.2;margin:8px 0 10px;font-weight:600}
+h2{font-size:19px;margin:0 0 4px;font-weight:600}
+p{margin:0 0 12px;color:var(--dim)}
+p.lead{font-size:19px;color:var(--text)}
+b,.hl{color:var(--accent)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.tile p{margin:0 0 10px;font-size:15.5px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+button{font:inherit;font-size:15.5px;border:1px solid var(--line);background:#2a3037;color:var(--text);padding:8px 14px;
+  border-radius:10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.main{background:var(--accent);border-color:var(--accent);color:#1a1410;font-weight:600;padding:10px 22px}
+.nav{display:flex;align-items:center;gap:12px;padding-top:16px;border-top:1px solid var(--line)}
+.nav .sp{flex:1}
+.say{display:inline-block;background:#2a3037;border:1px solid var(--line);border-radius:8px;padding:1px 8px;
+  color:var(--accent2);font-size:15.5px}
+kbd{background:#2a3037;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:0 6px;font:14px Ubuntu Mono,monospace}
+table{border-collapse:collapse;width:100%;font-size:15.5px}
+td{padding:5px 8px;border-bottom:1px solid var(--line);color:var(--dim)} td:first-child{color:var(--text);white-space:nowrap}
+.shot{display:block;max-width:100%;max-height:300px;border-radius:12px;border:1px solid var(--line)}
+.ok{color:#8fd18f} .warn{color:#e0c068}
+label{color:var(--dim);font-size:15px;display:flex;gap:8px;align-items:center}
+</style></head>
+<body><div class="app">
+<div class="top"><img src="logo-wide.png" alt="Claude's Computer"><div class="dots" id="dots"></div></div>
+
+<section class="page on">
+  <h1>Welcome to your new computer</h1>
+  <p class="lead">This is a full computer that runs in the cloud as part of your Claude plan. You can use it from your TV,
+    with a keyboard and mouse, and pick up where you left off.</p>
+  <div class="grid">
+    <div class="tile"><h2>Turning it on</h2><p>Open Claude on your phone, go to your Claude's Computer session and say
+      <span class="say">desktop on</span>. The TV app opens the desktop by itself.</p></div>
+    <div class="tile"><h2>Turning it off</h2><p>You don't have to. When nobody is using it, it goes to sleep on its own,
+      like a laptop with the lid closed. Your files stay.</p></div>
+    <div class="tile"><h2>It's Linux</h2><p>Never used Linux? You'll be fine. It works like Windows or a Mac: a menu,
+      windows, folders, and Chrome for the web. This walkthrough shows you where things are.</p></div>
+    <div class="tile"><h2>Claude isn't watching</h2><p>This is Claude's computer, but he only comes when you ask. He
+      doesn't see your screen, read what you type or look at your files while you use it. When you want help
+      (installing an app, fixing a setting), ask him in your session, like calling IT.</p></div>
+  </div>
+</section>
+
+<section class="page">
+  <h1>Bring your accounts</h1>
+  <p class="lead">Like a new laptop, sign in once and your things come with you.</p>
+  <div class="grid">
+    <div class="tile"><h2>Google</h2><p>Sign in to Chrome to get your bookmarks, saved passwords, history and
+      extensions. If you use Google Password Manager, that's all you need.</p>
+      <div class="row"><button data-open="google">Sign in to Chrome</button></div></div>
+    <div class="tile"><h2>A password manager</h2><p>Use something else for passwords? Add it to Chrome and sign in.</p>
+      <div class="row"><button data-open="bitwarden">Bitwarden</button><button data-open="1password">1Password</button>
+      <button data-open="proton">Proton Pass</button></div></div>
+    <div class="tile"><h2>Claude on the web</h2><p>Open Claude in Chrome to chat with it on this computer too.</p>
+      <div class="row"><button data-open="claude">Open claude.ai</button></div></div>
+    <div class="tile"><h2>For coders</h2><p>Sign in to GitHub, or ask Claude to set up your tools.</p>
+      <div class="row"><button data-open="github">GitHub</button><button data-open="terminal">Terminal</button></div></div>
+  </div>
+  <p style="margin-top:14px">Your passwords stay in Chrome or your password manager, never in your chat with Claude.</p>
+</section>
+
+<section class="page">
+  <h1>Find your way around</h1>
+  <div class="grid">
+    <div><img class="shot" src="menu.jpg" alt="The menu"></div>
+    <div>
+      <p class="lead"><b>Menu</b>, bottom left, is your Start menu: every app, and a search box. Just start typing.</p>
+      <div class="row" style="margin-bottom:14px"><button data-open="menu">Show me the Menu</button></div>
+      <p><b>Desktop icons</b>: double-click to open. <b>Bottom bar</b>: your open windows, the volume and the clock.</p>
+      <p><b>Windows</b>: drag one to the left or right edge to fill half the screen, to the top to fill it all. The
+        buttons top right minimize, maximize and close.</p>
+    </div>
+  </div>
+  <table style="margin-top:14px">
+    <tr><td><kbd>Ctrl</kbd> <kbd>C</kbd> / <kbd>V</kbd></td><td>Copy / paste, everywhere</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>T</kbd></td><td>New tab in Chrome</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>T</kbd></td><td>Terminal (for typing commands, if you like)</td></tr>
+    <tr><td>Right-click</td><td>More options, like on Windows</td></tr>
+  </table>
+</section>
+
+<section class="page">
+  <h1>Your files</h1>
+  <p class="lead">Your folders are where you'd expect: <span id="folders">Documents, Downloads, Pictures, Music, Videos</span>.</p>
+  <div class="row" style="margin-bottom:16px"><button data-open="files">Open my files</button></div>
+  <div class="grid">
+    <div class="tile"><h2>Back up your files</h2><p>Claude's computer doesn't have much room<span id="free"></span>,
+      and it can be replaced now and then. Keep what matters in a cloud drive you already use: Google Drive,
+      OneDrive, Dropbox or iCloud all work in Chrome.</p><p id="saved"></p></div>
+    <div class="tile"><h2>Staying signed in on a new machine</h2><p>The cloud machine is sometimes replaced. To keep your
+      Chrome logins when that happens, ask Claude: <span class="say">set a vault password</span>. A box appears here on
+      the screen for you to type it, never in the chat.</p></div>
+  </div>
+</section>
+
+<section class="page">
+  <h1>Getting apps</h1>
+  <p class="lead">Linux doesn't use .exe or .dmg installers. Instead, just ask Claude.</p>
+  <div class="grid">
+    <div class="tile"><h2>Ask for anything</h2><p>Say <span class="say">install GIMP</span>,
+      <span class="say">install Spotify</span> or <span class="say">I need something to edit videos</span>.
+      Claude installs it and it shows up in the Menu.</p></div>
+    <div class="tile"><h2>Already here</h2><p>Chrome and Firefox, LibreOffice (Word, Excel and PowerPoint files),
+      GIMP (photos), VLC (music and videos), Notes, Files, a PDF viewer and a
+      calculator. <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Esc</kbd> opens the Task Manager.</p>
+      <div class="row"><button data-open="writer">Write a document</button><button data-open="files">Files</button></div></div>
+    <div class="tile"><h2>Wake it from the TV</h2><p>No phone handy? Ask Claude once to <span class="say">set up waking
+      from the TV</span> and choose a 4-digit PIN. After that, OK and your PIN on the TV's asleep screen turns it on.</p></div>
+    <div class="tile"><h2>Phone or tablet</h2><p>You can open this desktop in a browser on your own devices too. On a phone,
+      the keyboard button bottom right opens the keyboard.</p></div>
+  </div>
+</section>
+
+<section class="page">
+  <h1>You're all set</h1>
+  <p class="lead">Enjoy your computer. If something isn't right, tell Claude what you see, in your own words.</p>
+  <div class="tile" style="margin-top:18px"><h2>One more thing: Claude can reach your home</h2><p>While the TV app is
+    open, this computer is on your home network. So when you ask, Claude can work on things in your house too: smart
+    lights and plugs, cameras, your router, the other computers in the house. Try asking him to <span class="say">give my home
+    network a check-up</span>. Like everything else here, he only does it when you ask.</p></div>
+  <p style="margin-top:18px">You can open this walkthrough again from the Menu: <b>Welcome</b>.</p>
+  <label style="margin-top:20px"><input type="checkbox" id="again"> Show this again next time</label>
+</section>
+
+<div class="nav"><button id="back">Back</button><span class="sp"></span><button class="main" id="next">Let's go</button></div>
+</div>
+<script>
+var K = new URLSearchParams(location.hash.slice(1)).get("k") || "";
+var pages = document.querySelectorAll(".page"), i = 0, dots = document.getElementById("dots");
+pages.forEach(function () { dots.appendChild(document.createElement("i")); });
+function call(path) { return fetch(path + (path.indexOf("?") < 0 ? "?" : "&") + "k=" + encodeURIComponent(K)).then(function (r) { return r.json(); }); }
+function show(n) {
+  i = Math.max(0, Math.min(pages.length - 1, n));
+  pages.forEach(function (p, j) { p.classList.toggle("on", j === i); dots.children[j].classList.toggle("on", j <= i); });
+  document.getElementById("back").style.visibility = i ? "visible" : "hidden";
+  document.getElementById("next").textContent = i === 0 ? "Let's go" : i === pages.length - 1 ? "Finish" : "Next";
+}
+document.getElementById("next").onclick = function () {
+  if (i < pages.length - 1) return show(i + 1);
+  call("/done?again=" + (document.getElementById("again").checked ? 1 : 0)).finally(function () { window.close(); });
+};
+document.getElementById("back").onclick = function () { show(i - 1); };
+document.querySelectorAll("[data-open]").forEach(function (b) {
+  b.onclick = function () { call("/open?what=" + b.dataset.open); };
+});
+document.addEventListener("keydown", function (e) {
+  if (e.key === "ArrowRight" || e.key === "Enter") document.getElementById("next").click();
+  if (e.key === "ArrowLeft") document.getElementById("back").click();
+});
+call("/status").then(function (s) {
+  if (s.folders.length) document.getElementById("folders").textContent = s.folders.join(", ");
+  if (s.free_gb) document.getElementById("free").textContent = " (about " + s.free_gb + " GB free)";
+  document.getElementById("saved").innerHTML = s.saved_at
+    ? '<span class="ok">Automatic backup is on:</span> your folders save to your Google Drive every 15 minutes. Last saved ' + new Date(s.saved_at * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) + '.'
+    : 'Use Google Drive? Ask Claude to <span class="say">back up my files to Drive</span> and your folders save there by themselves.';
+}).catch(function () {});
+setInterval(function () { call("/ping").catch(function () {}); }, 5000);
+show(0);
+</script>
+</body></html>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.ccrd.helper" android:versionCode="14" android:versionName="1.0">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-feature android:name="android.software.leanback" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+    <application android:label="Claude's Computer helper" android:allowBackup="false" android:extractNativeLibs="true">
+        <!-- Used only by Claude's Computer (signed with the same key; HelperService checks). No screen of its own. -->
+        <service android:name="dev.ccrd.helper.HelperService" android:exported="true"/>
+        <!-- The disguise (LoopVpn.java): a made-up network inside this app, so the TV's remote service sees a stranger. -->
+        <service android:name="dev.ccrd.helper.LoopVpn" android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
+        </service>
+        <activity android:name="dev.ccrd.helper.AllowActivity" android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+    </application>
+</manifest>

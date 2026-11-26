@@ -1,0 +1,9 @@
+out/
+*.keystore
+*.jks
+*.apk
+*.idsig
+ts.state
+tv-app/libs/
+tv-app/build/
+__pycache__/
