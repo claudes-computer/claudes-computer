@@ -21,12 +21,15 @@ say "TV: $(sh getprop ro.product.model), Android $REL (API $SDK), $(sh getprop r
 # 1. Install and open
 unzip -p "$APK" assets/helper.apk > "$OUT/helper.apk" 2>/dev/null
 r=$(adb install -r "$APK" 2>&1 | tail -1); say "install app: $r"; case "$r" in *Success*) ;; *) exit 1;; esac
-if [ -s "$OUT/helper.apk" ]; then say "install helper: $(adb install -r "$OUT/helper.apk" 2>&1 | tail -1)"; fi
+if [ -s "$OUT/helper.apk" ]; then say "install helper: $(adb install -r "$OUT/helper.apk" 2>&1 | grep -v '^$' | tail -2 | tr '\n' ' ')"; fi
 rm -f "$OUT/helper.apk"
 adb logcat -c
-sh monkey -p $PKG -c android.intent.category.LEANBACK_LAUNCHER 1 >/dev/null
+say "start: $(sh am start -W -n $PKG/dev.ccrd.tv.MainActivity | grep -E 'Status|Error|TotalTime' | tr '\n' ' ')"
 sleep 20; shot 1-opened
-if alive; then say "open: ok"; else say "open: FAILED (the app isn't running)"; FAIL=1; fi
+if alive; then say "open: ok"; else
+  say "open: FAILED (the app isn't running)"; FAIL=1
+  adb logcat -d | grep -E "AndroidRuntime|$PKG|libgojni|DEBUG   :|Fatal signal" | tail -40 >> "$OUT/summary.txt"
+fi
 say "in front: $(sh dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity' | grep -o '[a-z.]*/[A-Za-z.]*' | head -1)"
 
 # 2. The settings the helper setup applies (cloud/tv-helper-setup.sh tune): do the commands work on this Android?
@@ -54,6 +57,7 @@ alive && say "after wake: running" || say "after wake: not running"
 
 # 4. Restart: does the exempt list take, and does the helper's start-up run?
 say "--- restart"
+adb logcat -d > "$OUT/logcat-before-restart.txt" 2>/dev/null
 adb reboot; sleep 10
 if booted; then
   sleep 40; shot 3-restarted
@@ -65,8 +69,10 @@ else say "restart: the TV didn't come back in 15 minutes"; fi
 
 # 5. Crashes
 adb logcat -d > "$OUT/logcat.txt" 2>/dev/null
-C=$(grep -c -E "FATAL EXCEPTION|Fatal signal" "$OUT/logcat.txt"); OURS=$(grep -A3 -E "FATAL EXCEPTION|Fatal signal" "$OUT/logcat.txt" | grep -c -E "$PKG|$H|ccrd")
+cat "$OUT/logcat-before-restart.txt" "$OUT/logcat.txt" > "$OUT/all.txt" 2>/dev/null
+C=$(grep -c -E "FATAL EXCEPTION|Fatal signal" "$OUT/all.txt"); OURS=$(grep -A3 -E "FATAL EXCEPTION|Fatal signal" "$OUT/all.txt" | grep -c -E "$PKG|$H|ccrd")
 say "--- crashes: $OURS ours, $C on the TV in total"
-[ "$OURS" -gt 0 ] && { grep -A12 "FATAL EXCEPTION" "$OUT/logcat.txt" | grep -B2 -A10 -E "$PKG|$H" | head -40 >> "$OUT/summary.txt"; FAIL=1; }
+[ "$OURS" -gt 0 ] && { grep -A12 -E "FATAL EXCEPTION|Fatal signal" "$OUT/all.txt" | grep -B2 -A10 -E "$PKG|$H" | head -40 >> "$OUT/summary.txt"; FAIL=1; }
+rm -f "$OUT/all.txt"
 say "RESULT: $([ $FAIL = 0 ] && echo PASS || echo FAIL)"
 exit $FAIL
