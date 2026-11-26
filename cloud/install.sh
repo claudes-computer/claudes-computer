@@ -116,6 +116,12 @@ if [ -f /root/.ccr/ca-bundle.crt ]; then
   done
   rm -rf "$C"
 fi
+# Other sandboxes put their proxy's certificate in the system store: trust those in the desktop's browsers too.
+for f in /usr/local/share/ca-certificates/*proxy*.crt; do
+  [ -f "$f" ] || continue
+  certutil -d sql:$H/.pki/nssdb -A -t "C,," -n "sandbox-$(basename "$f" .crt)" -i "$f" || true
+  install -m 644 "$f" $D/sandbox-ca-$(basename "$f" .crt).pem
+done
 
 # ---- Our own scripts, launchers and settings ----------------------------------------------------------------
 for s in desktop-on.sh keepawake.sh apply-look.sh fix-python-apps.sh \
