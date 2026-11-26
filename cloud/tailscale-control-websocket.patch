@@ -2,11 +2,12 @@ For machines behind an HTTP proxy that intercepts TLS and refuses Tailscale's pr
 WebSockets (seen in another AI agent's sandbox: CONNECT works, then 403 on POST /ts2021). Tailscale 1.106+.
 - Control: after the normal dial fails with "unexpected HTTP response", connect over WebSocket, as the browser
   (js/wasm) client always does. TS_CONTROL_WEBSOCKET=1 tries it first. Noise still runs inside.
-- DERP: links in Tailscale's own opt-in feature/derpwebsocket, which falls back to WebSockets the same way.
+- DERP: links in Tailscale's own opt-in feature/derpwebsocket, which falls back to WebSockets the same way;
+  TS_DERP_WEBSOCKET=1 skips the DERP upgrade attempt and uses WebSockets from the start.
 Tested 2026-11-26 against controlplane.tailscale.com: "controlhttp: connected over WebSocket", login link issued.
 Apply: cd tailscale-src && patch -p1 < tailscale-control-websocket.patch; run tailscaled with HTTPS_PROXY set.
 
-diff -ruN -x 'tailscale*-ws' ts-ws.orig/cmd/tailscaled/derpwebsocket.go ts-ws/cmd/tailscaled/derpwebsocket.go
+diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/cmd/tailscaled/derpwebsocket.go ts-ws/cmd/tailscaled/derpwebsocket.go
 --- a/cmd/tailscaled/derpwebsocket.go	1969-12-31 16:00:00.000000000 -0800
 +++ b/cmd/tailscaled/derpwebsocket.go	2026-11-26 13:35:08.228037710 -0800
 @@ -0,0 +1,9 @@
@@ -19,7 +20,7 @@ diff -ruN -x 'tailscale*-ws' ts-ws.orig/cmd/tailscaled/derpwebsocket.go ts-ws/cm
 +
 +// DERP inside WebSockets when a TLS-intercepting proxy refuses DERP's own upgrade (see feature/derpwebsocket).
 +import _ "tailscale.com/feature/derpwebsocket"
-diff -ruN -x 'tailscale*-ws' ts-ws.orig/control/controlhttp/client.go ts-ws/control/controlhttp/client.go
+diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client.go ts-ws/control/controlhttp/client.go
 --- a/control/controlhttp/client.go	2026-11-26 13:35:07.833965874 -0800
 +++ b/control/controlhttp/client.go	2026-11-26 13:35:08.224136548 -0800
 @@ -68,7 +68,19 @@
@@ -43,7 +44,7 @@ diff -ruN -x 'tailscale*-ws' ts-ws.orig/control/controlhttp/client.go ts-ws/cont
  }
  
  func (a *Dialer) logf(format string, args ...any) {
-diff -ruN -x 'tailscale*-ws' ts-ws.orig/control/controlhttp/client_ws.go ts-ws/control/controlhttp/client_ws.go
+diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client_ws.go ts-ws/control/controlhttp/client_ws.go
 --- a/control/controlhttp/client_ws.go	1969-12-31 16:00:00.000000000 -0800
 +++ b/control/controlhttp/client_ws.go	2026-11-26 13:35:08.160520728 -0800
 @@ -0,0 +1,75 @@
@@ -122,3 +123,27 @@ diff -ruN -x 'tailscale*-ws' ts-ws.orig/control/controlhttp/client_ws.go ts-ws/c
 +	a.logf("controlhttp: connected over WebSocket")
 +	return &ClientConn{Conn: cc}, nil
 +}
+diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/derp/derphttp/derphttp_client.go ts-ws/derp/derphttp/derphttp_client.go
+--- a/derp/derphttp/derphttp_client.go	2026-11-26 13:35:07.834686997 -0800
++++ b/derp/derphttp/derphttp_client.go	2026-11-26 13:38:49.845255094 -0800
+@@ -364,6 +364,10 @@
+ 	return false
+ }
+ 
++// derpWebsocketFirst skips DERP's own HTTP upgrade and goes straight to the WebSocket fallback (for testing it, or
++// for a proxy known to refuse the upgrade).
++var derpWebsocketFirst = envknob.RegisterBool("TS_DERP_WEBSOCKET")
++
+ // maxErrBodyBytes is how much of a non-101 response body to include in the connect error message.
+ const maxErrBodyBytes = 1 << 10
+ 
+@@ -388,6 +392,9 @@
+ 	if !ok {
+ 		return c.connectLocked(ctx, caller, nil)
+ 	}
++	if derpWebsocketFirst() {
++		c.websocket = true
++	}
+ 	if c.websocket {
+ 		client, connGen, err = c.connectLocked(ctx, caller, upgradeWebsocket)
+ 		if err == nil {
