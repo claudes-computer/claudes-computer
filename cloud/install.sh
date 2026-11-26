@@ -31,7 +31,8 @@ apt-get install -y -qq --no-install-recommends \
   mousepad ristretto file-roller gnome-calculator evince vlc \
   mint-y-icons fonts-ubuntu \
   cups cups-client cups-ipp-utils socat ieee-data \
-  python3-venv xclip xsel openssh-client iproute2 libnss3-tools curl unzip python3-pyatspi gir1.2-atspi-2.0
+  python3-venv xclip xsel openssh-client iproute2 libnss3-tools curl unzip python3-pyatspi gir1.2-atspi-2.0 \
+  xz-utils bzip2 patch git ca-certificates sudo procps psmisc   # basics a bare container image doesn't have
 # The everyday apps people would miss on a new computer: office, photo editing, sticky notes, a task manager,
 # and fonts so documents and other languages look right. Nothing else.
 apt-get install -y -qq --no-install-recommends \
