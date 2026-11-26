@@ -20,6 +20,7 @@ import android.os.Parcel;
 public class HelperService extends Service {
     static final int PAIR_START = 1, PAIR_CODE = 2, KEYS = 3, EXPECT_INSTALL = 4, STATUS = 5, ADB_PAIR = 6, SHELL = 7, HEARTBEAT = 8;
     static final String OPEN_APP = "link:claudescomputer://open";
+    static final String BOOT = "dev.ccrd.helper.BOOT";
     private static final String TAG = "ClaudeHelper";
 
     private SharedPreferences prefs;
@@ -52,7 +53,25 @@ public class HelperService extends Service {
         stopSelf();
     }
 
-    @Override public int onStartCommand(Intent i, int flags, int id) { return START_NOT_STICKY; }
+    @Override public int onStartCommand(Intent i, int flags, int id) {
+        if (i != null && BOOT.equals(i.getAction())) {
+            // The TV just started (BootReceiver): wait for the network, then open the app as the TV's remote.
+            hold();
+            new Thread(new Runnable() { public void run() {
+                try {
+                    if (prefs.getBoolean("paired", false)) {
+                        for (int t = 0; t < 4; t++) {
+                            Thread.sleep(t == 0 ? 20000 : 15000);
+                            try { disguised(OPEN_APP); android.util.Log.i(TAG, "boot: opened the app"); break; }
+                            catch (Exception e) { android.util.Log.w(TAG, "boot: " + e); }
+                        }
+                    }
+                } catch (InterruptedException e) { }
+                finally { release(); }
+            } }, "boot").start();
+        }
+        return START_NOT_STICKY;
+    }
 
     // ---- watchdog: the app says "front" every 30 s while it is on screen and "away" when the person leaves it.
     // If it was in front and goes silent (it crashed, or Android closed it), open it again. Up to 3 tries. ----

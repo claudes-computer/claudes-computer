@@ -3,6 +3,7 @@
     package="dev.ccrd.helper" android:versionCode="14" android:versionName="1.0">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <application android:label="Claude's Computer helper" android:allowBackup="false" android:extractNativeLibs="true">
@@ -13,6 +14,10 @@
             android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
         </service>
+        <!-- The TV started: open Claude's Computer so the TV is reachable again (BootReceiver.java). -->
+        <receiver android:name="dev.ccrd.helper.BootReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>
+        </receiver>
         <activity android:name="dev.ccrd.helper.AllowActivity" android:exported="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
     </application>
