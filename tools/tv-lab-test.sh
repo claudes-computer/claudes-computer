@@ -20,11 +20,13 @@ booted(){ T=600 adb wait-for-device; for i in $(seq 1 180); do [ "$(sh getprop s
 REL=$(sh getprop ro.build.version.release); SDK=$(sh getprop ro.build.version.sdk)
 say "TV: $(sh getprop ro.product.model), Android $REL (API $SDK), $(sh getprop ro.product.cpu.abi)"
 
-# 1. Install and open
+# 1. Install and open. (Google Play Protect scans apps installed through adb and can sit on an install for minutes
+# on an emulator; it isn't what's being tested here.)
+sh settings put global verifier_verify_adb_installs 0 >/dev/null; sh settings put global package_verifier_enable 0 >/dev/null
 unzip -p "$APK" assets/helper.apk > "$OUT/helper.apk" 2>/dev/null
 r=$(adb install -r "$APK" 2>&1 | tail -1); say "install app: $r"; case "$r" in *Success*) ;; *) exit 1;; esac
 if [ -s "$OUT/helper.apk" ]; then
-  r=$(adb install -r "$OUT/helper.apk" 2>&1; echo "exit $?"); say "install helper: $(echo "$r" | grep -v '^$' | tail -2 | tr '\n' ' ')"
+  r=$(T=300 adb install -r --no-streaming "$OUT/helper.apk" 2>&1; echo "exit $?"); say "install helper: $(echo "$r" | grep -v '^$' | tail -2 | tr '\n' ' ')"
 fi
 rm -f "$OUT/helper.apk"
 adb logcat -c
