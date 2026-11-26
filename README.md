@@ -154,8 +154,7 @@ about 10 minutes after the last viewer leaves. A session can be replaced with a 
 
 Drew, with [Claude Code](https://claude.com/claude-code) doing much of the typing.
 [SECURITY.md](SECURITY.md) for reporting problems, [CHANGELOG.md](CHANGELOG.md) for what's in each build,
-[docs/measurements.md](docs/measurements.md) for how it performs. Pieces you can reuse on their own:
-[control an Android TV from an app on the same TV](tv-self-remote/README.md). The TV app builds with `tv-app/build.sh`.
+[docs/measurements.md](docs/measurements.md) for how it performs. The TV app builds with `tv-app/build.sh`.
 `ccrd` in file and device names is the project's short internal name.
 
 ## License
