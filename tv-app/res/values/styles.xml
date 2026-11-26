@@ -1,0 +1,7 @@
+<resources>
+    <!-- What Android shows for the instant before the app draws: plain black, not the old theme's silver gradient. -->
+    <style name="App" parent="@android:style/Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorBackground">@android:color/black</item>
+    </style>
+</resources>
