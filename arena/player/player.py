@@ -7,13 +7,13 @@ fresh (it reads rules + state + its own notes), take ORDERS.json, send it, commi
 usage: player.py --board http://host:7000 --token-file tok --agent claude|codex|gemini|grok
                  --notebook ./notebook --logs ./logs [--model M] [--turn-timeout 900]
 """
-import argparse, json, os, shlex, subprocess, sys, time, urllib.request
+import argparse, json, os, subprocess, threading, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # How each agent runs one turn headless, with full access to its own machine.
 AGENTS = {
-    "claude": lambda p, m: ["claude", "-p", p, "--dangerously-skip-permissions"] + (["--model", m] if m else []),
+    "claude": lambda p, m: ["claude", "-p", p, "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose"] + (["--model", m] if m else []),
     "codex":  lambda p, m: ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"] + (["-m", m] if m else []) + [p],
     "gemini": lambda p, m: ["gemini", "--yolo", "--skip-trust"] + (["-m", m] if m else []) + ["-p", p],
     "grok":   lambda p, m: ["grok", "--always-approve"] + (["-m", m] if m else []) + ["-p", p],
@@ -26,6 +26,29 @@ def call(board, token, path, body=None):
     with urllib.request.urlopen(req, timeout=30) as r:
         data = r.read().decode()
         return json.loads(data) if r.headers.get_content_type() == "application/json" else data
+
+def condense(line):
+    """One line of agent output → something a person can read (Claude's stream-json, or plain text)."""
+    line = line.strip()
+    if not line.startswith("{"): return line[:300] if line and not line.startswith("at ") else None
+    try: ev = json.loads(line)
+    except Exception: return line[:300]
+    if ev.get("type") != "assistant": return None
+    out = []
+    for c in ev.get("message", {}).get("content", []):
+        if c.get("type") == "text": out.append(c["text"][:400])
+        elif c.get("type") == "tool_use":
+            i = c.get("input", {})
+            out.append(f"▸ {c.get('name')}: " + str(i.get("command") or i.get("file_path") or i.get("description") or i)[:200])
+    return "\n".join(out) or None
+
+def share(board, token, nb, logpath, turn, status):
+    try:
+        lines = [x for x in (condense(l) for l in open(logpath, errors="replace")) if x]
+        notes = open(os.path.join(nb, "NOTES.md"), errors="replace").read()[-6000:]
+        call(board, token, "/feed", {"turn": turn, "status": status, "notes": notes, "feed": lines[-40:]})
+    except Exception:
+        pass
 
 def git(nb, *args):
     return subprocess.run(["git", "-C", nb, *args], capture_output=True, text=True)
@@ -66,18 +89,26 @@ def main():
         orders = os.path.join(nb, "ORDERS.json")
         if os.path.exists(orders): os.remove(orders)
         t0 = time.time()
-        with open(os.path.join(logs, f"turn-{turn:05d}.log"), "w") as lf:
+        logpath = os.path.join(logs, f"turn-{turn:05d}.log")
+        thinking = threading.Event(); thinking.set()
+        def feed():  # the mind feed: stream what the agent is doing to the board, for spectators only
+            while thinking.is_set():
+                share(a.board, token, nb, logpath, turn, "thinking"); time.sleep(3)
+        threading.Thread(target=feed, daemon=True).start()
+        with open(logpath, "w") as lf:
             try:
                 subprocess.run(AGENTS[a.agent](prompt, a.model), cwd=nb, stdout=lf, stderr=subprocess.STDOUT,
                                stdin=subprocess.DEVNULL, timeout=a.turn_timeout)
             except subprocess.TimeoutExpired:
                 lf.write("\n[player kit] agent ran out of time\n")
+        thinking.clear()
         try: body = json.load(open(orders))
         except Exception: body = {"turn": turn, "actions": []}
         body["turn"] = turn
         try: res = call(a.board, token, "/act", body)
         except Exception as e: res = {"ok": False, "error": str(e)}
         git(nb, "add", "-A"); git(nb, "commit", "-qm", f"turn {turn}")
+        share(a.board, token, nb, logpath, turn, "done")
         done_turn = turn
         print(f"turn {turn}: {json.dumps(body.get('actions'))} {res} ({time.time()-t0:.0f}s)", flush=True)
 

@@ -73,6 +73,7 @@ def main():
     ap.add_argument("--deadline", type=int, default=900)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--names", default="", help="P1=Claude,P2=GPT,... (shown to spectators)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     seats = a.seats.split(",")
@@ -80,6 +81,12 @@ def main():
     tokens = json.load(open(tok_file)) if os.path.exists(tok_file) else {p: secrets.token_hex(12) for p in seats}
     json.dump(tokens, open(tok_file, "w"), indent=1); os.chmod(tok_file, 0o600)
     by_token = {t: p for p, t in tokens.items()}
+    key_file = os.path.join(a.out, "spectator.key")
+    if not os.path.exists(key_file): open(key_file, "w").write(secrets.token_hex(8))
+    spectator_key = open(key_file).read().strip()
+    names = dict(kv.split("=", 1) for kv in a.names.split(",") if "=" in kv)
+    feeds = {p: {"status": "waiting", "turn": 0, "notes": "", "feed": []} for p in seats}
+    watch_html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "watch.html")).read()
     g = Game(seats, a.rounds, a.seed)
     lock = threading.Lock()
     wire = open(os.path.join(a.out, "wire.jsonl"), "a")
@@ -110,6 +117,14 @@ def main():
             self.send_response(code); self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
         def do_GET(self):
+            path, _, q = self.path.partition("?")
+            if path in ("/watch", "/watch.json"):
+                if f"key={spectator_key}" not in q: return self.send(403, {"error": "spectator key needed"})
+                if path == "/watch": return self.send(200, watch_html, "text/html; charset=utf-8")
+                with lock:
+                    return self.send(200, {"round": g.turn, "of": g.rounds, "over": g.over, "mines": g.mines,
+                        "gold": g.gold, "history": g.history, "picked": sorted(g.pending),
+                        "seats": [{"seat": p, "name": names.get(p, p), **feeds[p]} for p in seats]})
             seat = self.seat()
             if not seat: return self.send(401, {"error": "bad token"})
             with lock:
@@ -126,12 +141,17 @@ def main():
             n = int(self.headers.get("Content-Length", 0) or 0)
             try: body = json.loads(self.rfile.read(n) or b"{}")
             except Exception: return self.send(400, {"ok": False, "error": "not JSON"})
+            if self.path == "/feed":
+                with lock:
+                    feeds[seat] = {k: body.get(k) for k in ("status", "turn", "notes", "feed")}
+                return self.send(200, {"ok": True})
             if self.path != "/act": return self.send(404, {"error": "no such path"})
             with lock:
                 err = g.act(seat, body); log(event="act", seat=seat, body=body, error=err)
             self.send(200, {"ok": err is None, **({"error": err} if err else {})})
 
     print(f"mines board on :{a.port}, seats {seats}, tokens in {tok_file}", flush=True)
+    print(f"spectators: http://<this machine>:{a.port}/watch?key={spectator_key}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", a.port), H).serve_forever()
 
 if __name__ == "__main__":

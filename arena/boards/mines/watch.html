@@ -1,0 +1,58 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Arena · Mines</title>
+<style>
+:root{--bg:#0e1116;--card:#171b22;--line:#2a303b;--text:#e8ebf0;--dim:#8b93a1;--gold:#f2c14e;--good:#5ccf8a;--think:#6aa8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,sans-serif}
+header{display:flex;align-items:baseline;gap:24px;padding:16px 24px;border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:28px}.round{color:var(--dim);font-size:20px}
+.mines{display:flex;gap:12px;margin-left:auto}.mine{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 14px;font-size:20px}
+.mine b{color:var(--gold)}
+main{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:12px 24px}
+.seat{background:var(--card);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0;height:calc(100vh - 290px)}
+.seat h2{margin:0;padding:10px 14px;font-size:22px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
+.gold{color:var(--gold)}.status{font-size:14px;padding:2px 14px 8px;color:var(--dim)}
+.status.thinking{color:var(--think)}.status.done{color:var(--good)}
+.label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);padding:6px 14px 2px}
+.feed,.notes{overflow:auto;padding:4px 14px 10px;font:13px/1.45 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
+.feed{flex:3;color:#c9d1dc}.notes{flex:2;border-top:1px solid var(--line);color:#b7c7a8}
+footer{padding:0 24px 16px}.hist{display:flex;flex-direction:column;gap:6px;max-height:170px;overflow:auto}
+.h{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:15px}
+.h .said{color:var(--dim);font-style:italic}
+@media (max-width:900px){main{grid-template-columns:1fr}.seat{height:auto;max-height:70vh}header{flex-wrap:wrap}.mines{margin-left:0}}
+</style></head><body>
+<header><h1>Mines</h1><div class="round" id="round"></div><div class="mines" id="mines"></div></header>
+<main id="seats"></main>
+<footer><div class="label" style="padding-left:0">Rounds so far</div><div class="hist" id="hist"></div></footer>
+<script>
+const key = new URLSearchParams(location.search).get("key");
+const esc = s => String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+let pinned = {};
+async function tick(){
+  let d; try { d = await (await fetch("watch.json?key=" + encodeURIComponent(key))).json(); } catch(e) { return; }
+  const names = Object.fromEntries(d.seats.map(s => [s.seat, s.name]));
+  document.getElementById("round").textContent = d.over ? "Final" : `Round ${d.round} of ${d.of}`;
+  document.getElementById("mines").innerHTML = d.over ? "" :
+    Object.entries(d.mines).map(([m,g]) => `<div class="mine">${m} <b>${g}</b></div>`).join("");
+  const seatsEl = document.getElementById("seats");
+  if (!seatsEl.children.length) seatsEl.innerHTML = d.seats.map(s => `<section class="seat" id="s-${s.seat}">
+      <h2><span>${esc(s.name)}</span><span class="gold"></span></h2><div class="status"></div>
+      <div class="label">Thinking out loud</div><div class="feed"></div>
+      <div class="label">Notebook</div><div class="notes"></div></section>`).join("");
+  for (const s of d.seats) {
+    const el = document.getElementById("s-" + s.seat);
+    el.querySelector(".gold").textContent = (d.gold[s.seat] ?? 0) + " gold";
+    const st = d.over ? "game over" : d.picked.includes(s.seat) ? "picked ✓ (secret)" : s.status === "thinking" ? "thinking…" : "deciding";
+    const stEl = el.querySelector(".status"); stEl.textContent = st;
+    stEl.className = "status " + (s.status === "thinking" && !d.picked.includes(s.seat) ? "thinking" : d.picked.includes(s.seat) ? "done" : "");
+    const f = el.querySelector(".feed"), atBottom = f.scrollTop + f.clientHeight >= f.scrollHeight - 30;
+    f.textContent = (s.feed || []).join("\n"); if (atBottom) f.scrollTop = f.scrollHeight;
+    el.querySelector(".notes").textContent = s.notes || "";
+  }
+  document.getElementById("hist").innerHTML = d.history.slice().reverse().map(h => {
+    const picks = Object.entries(h.picks).map(([p,m]) => `${esc(names[p])} → <b>${m ?? "pass"}</b>`).join(" · ");
+    const said = Object.entries(h.said || {}).map(([p,t]) => `${esc(names[p])}: “${esc(t)}”`).join("  ");
+    return `<div class="h">R${h.round} &nbsp; ${picks}<div class="said">${said}</div></div>`; }).join("");
+}
+tick(); setInterval(tick, 2000);
+</script></body></html>
