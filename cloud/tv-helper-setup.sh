@@ -54,7 +54,7 @@ if [ $term = yes ]; then
   if [ "$st" != paired ]; then
     r=$(h pair); [ "$r" = ok ] || { echo "Remote pairing didn't start: $r"; exit 1; }
     sleep 2
-    code=$(sh 'uiautomator dump /data/local/tmp/ui.xml >/dev/null 2>&1; cat /data/local/tmp/ui.xml' | grep -oE 'text="[0-9A-F]{6}"' | head -1 | cut -d'"' -f2)
+    code=$(sh 'rm -f /data/local/tmp/ui.xml; uiautomator dump /data/local/tmp/ui.xml >/dev/null 2>&1; cat /data/local/tmp/ui.xml' | grep -oE 'text="[0-9A-F]{6}"' | head -1 | cut -d'"' -f2)
     [ -z "$code" ] && { echo "Couldn't read the code on the TV. Ask the person for it: $0 $IP code <code>"; exit 0; }
     r=$(h code "$code"); [ "$r" = ok ] || { echo "Remote pairing failed: $r"; exit 1; }
   fi
