@@ -39,7 +39,8 @@ if [ ! -f "$B/tailscale/.patched-$TSV" ]; then
 fi
 
 # The Go library -> libs/
-(cd "$HERE/ccrdnet" && gomobile bind -target=android/arm -androidapi 21 -ldflags="-s -w" -o "$B/ccrdnet.aar" .)
+# ABIS: which processors to build for. TVs are ARM; the test lab's emulator is x86 (ABIS=android/arm,android/386).
+(cd "$HERE/ccrdnet" && gomobile bind -target=${ABIS:-android/arm} -androidapi 21 -ldflags="-s -w" -o "$B/ccrdnet.aar" .)
 rm -rf "$B/aar" && mkdir "$B/aar" && (cd "$B/aar" && unzip -q "$B/ccrdnet.aar")
 rm -rf "$HERE/libs" && mkdir -p "$HERE/libs/jni" && cp "$B/aar/classes.jar" "$HERE/libs/ccrdnet-classes.jar" && cp -r "$B/aar/jni/"* "$HERE/libs/jni/"
 
