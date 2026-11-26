@@ -32,7 +32,8 @@ public class LoopVpn extends VpnService implements Runnable {
         try {
             tv = java.net.InetAddress.getByName(i.getStringExtra("tv")).getAddress();
             if (tun == null) {
-                tun = new Builder().setSession("Claude's Computer helper")
+                // Only this app's own traffic to the made-up network enters the tunnel: other apps can't use the disguise.
+                tun = new Builder().setSession("Claude's Computer helper").addAllowedApplication(getPackageName())
                     .addAddress("10.111.0.2", 24).addRoute("10.111.0.0", 24).setBlocking(true).establish();
                 if (tun == null) throw new Exception("not allowed");
                 loop = new Thread(this, "loop"); loop.start();
