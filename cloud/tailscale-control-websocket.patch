@@ -4,7 +4,8 @@ WebSockets (seen in another AI agent's sandbox: CONNECT works, then 403 on POST 
   (js/wasm) client always does. TS_CONTROL_WEBSOCKET=1 tries it first. Noise still runs inside.
 - DERP: links in Tailscale's own opt-in feature/derpwebsocket, which falls back to WebSockets the same way;
   TS_DERP_WEBSOCKET=1 skips the DERP upgrade attempt and uses WebSockets from the start.
-Tested 2026-11-26 against controlplane.tailscale.com: "controlhttp: connected over WebSocket", login link issued.
+Tested 2026-11-26: signed in and reached a home computer with both control and DERP over WebSocket (forced),
+64 ms ping via DERP; ~5 Mbit/s vs ~21 Mbit/s on the normal DERP upgrade through the same proxy.
 Apply: cd tailscale-src && patch -p1 < tailscale-control-websocket.patch; run tailscaled with HTTPS_PROXY set.
 
 diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/cmd/tailscaled/derpwebsocket.go ts-ws/cmd/tailscaled/derpwebsocket.go
@@ -125,7 +126,7 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client_ws.g
 +}
 diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/derp/derphttp/derphttp_client.go ts-ws/derp/derphttp/derphttp_client.go
 --- a/derp/derphttp/derphttp_client.go	2026-11-26 13:35:07.834686997 -0800
-+++ b/derp/derphttp/derphttp_client.go	2026-11-26 13:38:49.845255094 -0800
++++ b/derp/derphttp/derphttp_client.go	2026-11-26 13:57:01.015776486 -0800
 @@ -364,6 +364,10 @@
  	return false
  }
@@ -137,13 +138,24 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/derp/derphttp/derphttp_client.g
  // maxErrBodyBytes is how much of a non-101 response body to include in the connect error message.
  const maxErrBodyBytes = 1 << 10
  
-@@ -388,6 +392,9 @@
+@@ -388,6 +392,10 @@
  	if !ok {
  		return c.connectLocked(ctx, caller, nil)
  	}
-+	if derpWebsocketFirst() {
++	if derpWebsocketFirst() && !c.websocket {
 +		c.websocket = true
++		c.logf("%s: using WebSocket (TS_DERP_WEBSOCKET)", caller)
 +	}
  	if c.websocket {
  		client, connGen, err = c.connectLocked(ctx, caller, upgradeWebsocket)
  		if err == nil {
+@@ -403,6 +411,9 @@
+ 	c.logf("%s: HTTP upgrade failed, retrying with websocket: %v", caller, err)
+ 	client, connGen, err = c.connectLocked(ctx, caller, upgradeWebsocket)
+ 	c.websocket = err == nil
++	if err == nil {
++		c.logf("%s: connected over WebSocket", caller)
++	}
+ 	return client, connGen, err
+ }
+ 
