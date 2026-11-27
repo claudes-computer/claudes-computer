@@ -1,0 +1,49 @@
+# Recreates a newer TV's standby on an Android TV 14 emulator (Low Power Standby switched on, as TV makers ship it)
+# and checks that our exemption keeps the app on the network (tools/tv-standby-lab.sh). The result is in the run's
+# summary; the raw dumps are its artifacts. Runs when the script changes, and by hand.
+name: TV standby lab
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["tools/tv-standby-lab.sh", ".github/workflows/tv-standby-lab.yml"]
+permissions:
+  contents: read
+jobs:
+  standby:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build (with the x86 library for the emulator)
+        run: ABIS=android/arm,android/386 bash tv-app/build.sh 2>&1 | tail -3
+      - name: Let the emulator use the machine's virtualization
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: android-tv
+          arch: x86
+          profile: tv_1080p
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: false
+          script: bash tools/tv-standby-lab.sh tv-app/out/claudes-computer.apk standby-out
+      - name: Summary
+        if: always()
+        run: |
+          echo '```' >> "$GITHUB_STEP_SUMMARY"; cat standby-out/summary.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null; echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: standby-lab
+          path: standby-out
