@@ -81,14 +81,16 @@ if [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; then
   CR=$R/bin/crane
   if [ ! -x $CR ]; then
     mkdir -p $R/bin && curl -fsSL https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz \
-      | tar -xz -C $R/bin crane && chmod 755 $CR || { echo "FAILED: couldn't download crane from github.com"; exit 1; }
+      | tar -xz --no-same-owner -C $R/bin crane && chmod 755 $CR || { echo "FAILED: couldn't download crane from github.com"; exit 1; }
   fi
   mkdir -p $R && stop
   rmtree $R/.new $R/.oci $R/.tmp; mkdir -p $R/.new/rootfs
   # export flattens the image's layers into one filesystem; tar keeps owners and permissions.
-  $CR export "$IMAGE" - | tar -x --numeric-owner -p -C $R/.new/rootfs \
-    && [ -x $R/.new/rootfs/opt/ccrd/desktop-on.sh ] \
-    || { echo "FAILED: couldn't download or unpack $IMAGE"; rmtree $R/.new; exit 1; }
+  # Some home volumes refuse to give files to certain owners: tar carries on past those (listed in tar-errors.log),
+  # and only a missing desktop counts as failure.
+  $CR export "$IMAGE" - | tar -x --numeric-owner -p -C $R/.new/rootfs 2> $R/tar-errors.log
+  [ -x $R/.new/rootfs/opt/ccrd/desktop-on.sh ] || { echo "FAILED: couldn't download or unpack $IMAGE"; tail -3 $R/tar-errors.log; rmtree $R/.new; exit 1; }
+  n=$(grep -c "Cannot change ownership" $R/tar-errors.log); [ "$n" -gt 0 ] && echo "note: $n files couldn't get their owner here (see $R/tar-errors.log)"
   # Keep what belongs to this computer: the Tailscale identity (/state) and the desktop user's files.
   if [ -d $F ]; then
     for k in state home/desk; do [ -d $F/$k ] && { rmtree $R/.new/rootfs/$k; mv $F/$k $R/.new/rootfs/$k; }; done
