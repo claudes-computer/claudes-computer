@@ -57,7 +57,7 @@ case "$1" in stop) stop; echo stopped; exit 0;; status) status; exit;; report) r
 
 # The settings a service started from here needs.
 svc_envs(){ envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE \
-  CCRD_INBOX CCRD_INBOX_NAME CCRD_SCREEN CCRD_DERP_REGION CCRD_LOW_MEMORY CCRD_TS_SSH HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done; }
+  CCRD_INBOX CCRD_INBOX_NAME CCRD_SCREEN CCRD_DERP_REGION CCRD_LOW_MEMORY CCRD_TS_SSH CCRD_WALLPAPER HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done; }
 
 # Getting the image takes minutes. Where systemd runs the machine, that happens in its own service too, so a sandbox
 # that ends long commands can't cut the download off. Its output: $R/update.log.
@@ -106,6 +106,8 @@ if [ -n "$CCRD_IMPORT_STATE" ] && [ -f "$CCRD_IMPORT_STATE/ts.state" ] && [ ! -f
 fi
 
 # ---- Start --------------------------------------------------------------------------------------------------
+# CCRD_WALLPAPER: a picture on this machine to use as the desktop's background instead of the Claude's Computer logo.
+[ -f "$CCRD_WALLPAPER" ] && [ -d $F/opt/ccrd ] && cp "$CCRD_WALLPAPER" $F/opt/ccrd/wallpaper.png && chmod 644 $F/opt/ccrd/wallpaper.png
 chmod 755 $F   # some home folders unpack it without "others may enter", and the desktop runs as an ordinary user
 if [ -n "$(inside)" ] && $TS status >/dev/null 2>&1; then echo "Already running."; status; exit; fi
 # Where systemd runs the machine, the desktop runs as its service: it then outlives the command that started it
