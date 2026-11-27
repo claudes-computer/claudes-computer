@@ -10,6 +10,8 @@ permissions:
   contents: read
 jobs:
   chroot:
+    # Runs in the public repository only; private copies would run it twice and can't publish.
+    if: github.repository == 'claudes-computer/claudes-computer'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

@@ -15,6 +15,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    # Runs in the public repository only; private copies would run it twice and can't publish.
+    if: github.repository == 'claudes-computer/claudes-computer'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
