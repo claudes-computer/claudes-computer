@@ -36,7 +36,9 @@ TS="$D/tailscale --socket=$D/ts.sock"
 start_tailscaled() {
   pgrep -x tailscaled >/dev/null && return
   # --no-logs-no-support: don't upload Tailscale's diagnostic logs to Tailscale (their support then has none).
-  (setsid $D/tailscaled --tun=userspace-networking --statedir=$D/tsvar --state=$D/ts.state \
+  # CCRD_STATE_DIR: where the Tailscale identity is kept (the Docker image keeps it in its /state volume).
+  local S=${CCRD_STATE_DIR:-$D}
+  (setsid $D/tailscaled --tun=userspace-networking --statedir=$S/tsvar --state=$S/ts.state \
     --socket=$D/ts.sock --socks5-server=localhost:1055 --no-logs-no-support >/tmp/tsd.log 2>&1 &)
 }
 
