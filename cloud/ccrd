@@ -1,0 +1,338 @@
+#!/bin/bash
+# One command for every agent machine (Claude Code cloud, Codex cloud, Muse, ...): find out what the machine is like,
+# then run the desktop the way that machine allows, and report on it in the same few lines everywhere.
+#
+#   ccrd doctor     ~30 s probe: names each wall the machine has (wall / ok / unknown, with the evidence)
+#   ccrd up         runs the doctor, picks how to run and keep the desktop, starts it, prints the report
+#   ccrd up --plan  the same choice, printed, without starting anything
+#   ccrd up --update  get the newest desktop first (keeps the sign-in and the desktop's files)
+#   ccrd report     8 lines of status, the same on every machine: paste them as they are
+#   ccrd stay       keep a turn-bound machine awake while someone watches (ends IDLE, or AGAIN: run it again)
+#   ccrd stop       stop the desktop
+#
+# The walls:
+#   (a) processes  what a command starts is killed (or frozen) when the command or the agent's turn ends
+#   (b) proxy      egress proxy: TLS interception, a password in the proxy URL, Tailscale's upgrade refused,
+#                  WebSocket upgrades broken, the proxy's name resolving to a dead address inside containers
+#   (c) root       partial root: not root, no_new_privs, missing capabilities, rootless Docker, chroot only
+#   (d) machine    the machine is replaced or thrown away: which folders survive
+#   (e) memory     memory, swap and disk limits
+# Some walls only show across commands or machine replacements: the doctor leaves a marker each run and reads the
+# last one, so its second run (in a later command, or after a replacement) turns "unknown" into wall or ok.
+#
+# Settings come from the environment, or from a host's config file (CCRD_CONF, default ./ccrd.conf): CCRD_NAME,
+# CCRD_KEEP (the folder that survives), CCRD_METHOD (native|image|docker), CCRD_TURN_BOUND=1 (the machine sleeps
+# when the agent's turn ends), CCRD_TZ, CCRD_INBOX, CCRD_WALLPAPER, CCRD_DERP_REGION, CCRD_TS_AUTHKEY, DOCKER_HOST.
+# Never prints tokens or proxy passwords.
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd); REPO=$(dirname "$HERE")
+CONF=${CCRD_CONF:-./ccrd.conf}; [ -f "$CONF" ] && { set -a; . "$CONF"; set +a; }
+# A scheduled job may not inherit the shell's proxy settings: take them from the first process if missing.
+[ -z "$HTTPS_PROXY$https_proxy" ] && [ -r /proc/1/environ ] && \
+  eval "$(tr '\0' '\n' < /proc/1/environ | grep -E '^(HTTPS?_PROXY|https?_proxy)=' | sed 's/^/export /')"
+PROXY=${HTTPS_PROXY:-$https_proxy}
+UID0=$([ "$(id -u)" = 0 ] && echo 1)
+if [ -z "$DOCKER_HOST" ]; then for s in /run/codex-docker/docker.sock /run/user/$(id -u)/docker.sock; do
+  [ -S "$s" ] && { export DOCKER_HOST=unix://$s; break; }; done; fi
+
+# ---- Folders ------------------------------------------------------------------------------------------------
+# Candidate folders that might survive, each holding the doctor's marker (.ccrd/doctor.env).
+cands(){ { echo "${CCRD_KEEP:-}"; echo /home/hatch; echo /workspace; echo "$HOME"; ls -d /home/*/ 2>/dev/null | sed 's#/$##'
+  echo /var/tmp; echo /tmp; } | awk 'NF && !s[$0]++' | while read -r d; do [ -d "$d" ] && [ -w "$d" ] && echo "$d"; done; }
+fstype(){ df --output=fstype "$1" 2>/dev/null | tail -1 | tr -d ' '; }
+devof(){ df --output=source "$1" 2>/dev/null | tail -1 | tr -d ' '; }
+freegb(){ df -BG --output=avail "$1" 2>/dev/null | tail -1 | tr -dc 0-9; }
+# The folder the desktop keeps its things in: the one the host names, else the best surviving candidate.
+keep_dir(){
+  [ -n "$CCRD_KEEP" ] && { echo "$CCRD_KEEP"; return; }
+  local d; for d in $(cands); do case "$d" in /tmp|/var/tmp) continue;; esac
+    grep -qx "$d" "$1" 2>/dev/null && { echo "$d"; return; }; done
+  for d in /home/hatch /workspace; do [ -d "$d" ] && [ -w "$d" ] && { echo "$d"; return; }; done
+  echo "$HOME"
+}
+# Where the last up/doctor left its notes.
+state_dir(){ local d; for d in $(cands); do [ -O "$d/.ccrd/up.env" ] && { echo "$d/.ccrd"; return; }; done
+  for d in $(cands); do [ -O "$d/.ccrd/doctor.env" ] && { echo "$d/.ccrd"; return; }; done; }
+
+# ---- The doctor ---------------------------------------------------------------------------------------------
+line(){ printf '(%s) %-9s %-7s %s\n' "$1" "$2" "$3" "$4"; }
+doctor(){
+  local T; T=$(mktemp -d); local boot; boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+  local mid; mid=$(cat /etc/machine-id 2>/dev/null | cut -c1-12)
+  # The last run's markers: the newest one found, and which folders still hold one from that machine.
+  local last="" lt=0 d f t
+  for d in $(cands); do f=$d/.ccrd/doctor.env; [ -f "$f" ] && [ -O "$f" ] || continue
+    t=$(sed -n 's/^D_TIME=//p' "$f"); [ "${t:-0}" -gt "$lt" ] && { lt=$t; last=$f; }; done
+  local lboot="" lmid="" lpid="" lstart="" ldirs=""
+  [ -n "$last" ] && { lboot=$(sed -n 's/^D_BOOT=//p' "$last"); lmid=$(sed -n 's/^D_MID=//p' "$last")
+    lpid=$(sed -n 's/^D_PID=//p' "$last"); lstart=$(sed -n 's/^D_PSTART=//p' "$last"); ldirs=$(sed -n 's/^D_DIRS=//p' "$last"); }
+
+  # Network probes run side by side while the rest is checked.
+  local probes=""
+  if [ -n "$PROXY" ]; then
+    ( curl -sSv -m 8 -o /dev/null https://controlplane.tailscale.com/key?v=71 > $T/ts_v 2>&1; echo $? > $T/ts_rc; sed -n 's/^\*  issuer: //p' $T/ts_v | head -1 > $T/iss_ts ) & probes="$probes $!"
+    ( curl -sv -m 8 -o /dev/null https://github.com/ 2>&1 | sed -n 's/^\*  issuer: //p' | head -1 > $T/iss_gh ) & probes="$probes $!"
+    ( curl -k --http1.1 -s -m 6 -D $T/up_h -o /dev/null -H 'Upgrade: DERP' -H 'Connection: Upgrade' https://derp1.tailscale.com/derp >/dev/null 2>&1 ) & probes="$probes $!"
+    ( curl -k --http1.1 -s -m 6 -D $T/ws_h -o /dev/null -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Version: 13' \
+        -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: derp' https://derp1.tailscale.com/derp >/dev/null 2>&1 ) & probes="$probes $!"
+  else
+    ( curl -s -m 8 -o /dev/null -w '%{http_code}' https://controlplane.tailscale.com/key?v=71 > $T/direct 2>/dev/null ) & probes="$probes $!"
+  fi
+
+  # (a) processes. A sentinel left by the last run tells whether what a command starts outlives it.
+  local va=unknown ea="" nsd=""
+  local n1; n1=$(readlink /proc/1/ns/mnt 2>/dev/null); [ -n "$n1" ] && [ "$(readlink /proc/self/ns/mnt)" != "$n1" ] && nsd=1
+  if [ -n "$lpid" ] && [ "$lboot" = "$boot" ]; then
+    if [ -d /proc/$lpid ] && [ "$(awk '{print $22}' /proc/$lpid/stat 2>/dev/null)" = "$lstart" ]; then va=ok; ea="last run's background process still alive"
+      kill $lpid 2>/dev/null
+    else va=wall; ea="last run's background process is gone (same boot)"; fi
+  elif [ -n "$lpid" ]; then ea="machine changed since the last run; can't tell"
+  else ea="first run: run the doctor again in a later command to tell"; fi
+  [ -n "$nsd" ] && ea="$ea; each command has its own mount view"
+  [ "$(cat /proc/1/comm 2>/dev/null)" = systemd ] && [ -d /run/systemd/system ] && ea="$ea; systemd services available"
+  [ -n "$CCRD_TURN_BOUND" ] && { va=wall; ea="host config: machine sleeps when the agent's turn ends; $ea"; }
+  setsid sh -c 'exec sleep 86400' </dev/null >/dev/null 2>&1 & local spid=$!
+  sleep 0.2; local sstart; sstart=$(awk '{print $22}' /proc/$spid/stat 2>/dev/null)
+
+  # (c) root.
+  local vc=ok ec="" nnp cap
+  nnp=$(awk '/^NoNewPrivs/{print $2}' /proc/self/status); cap=$(awk '/^CapEff/{print $2}' /proc/self/status)
+  if [ -n "$UID0" ]; then ec="root"
+  elif sudo -n true 2>/dev/null; then ec="uid $(id -u), passwordless sudo"
+  else vc=wall; ec="uid $(id -u), no root, no sudo"; fi
+  [ "$nnp" = 1 ] && { vc=wall; ec="$ec; no_new_privs set (setuid programs won't gain root)"; }
+  if [ -n "$UID0" ]; then
+    (( (0x$cap >> 21) & 1 )) || { vc=wall; ec="$ec; no CAP_SYS_ADMIN"; }
+    local m; m=$(mktemp -d); unshare -m sh -c "mount -t tmpfs none $m" 2>/dev/null && ec="$ec; mount ok" || { vc=wall; ec="$ec; mount refused"; }; rmdir $m
+    chroot / /bin/true 2>/dev/null && ec="$ec; chroot ok" || { vc=wall; ec="$ec; chroot refused"; }
+    if command -v apt-get >/dev/null; then pgrep -x 'apt-get|dpkg|apt' >/dev/null && ec="$ec; apt busy now" || ec="$ec; apt ok"; fi
+  fi
+  local dk=""
+  if command -v docker >/dev/null && timeout 8 docker info >/dev/null 2>&1; then
+    dk=$(timeout 8 docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless && echo rootless || echo docker)
+    [ $dk = rootless ] && { [ -z "$UID0" ] && vc=wall; ec="$ec; rootless Docker (a host folder mounted in shows the wrong owner: use volumes)"; } || ec="$ec; Docker ok"
+  fi
+
+  # (d) machine. Markers in each candidate folder; a different boot or machine id since the last run shows which kept.
+  local vd=unknown ed="" kept="" lost="" root_fs; root_fs=$(fstype /)
+  if [ -n "$last" ] && { [ "$lboot" != "$boot" ] || [ "$lmid" != "$mid" ]; }; then
+    for d in ${ldirs//,/ }; do [ -f "$d/.ccrd/doctor.env" ] && [ "$(sed -n 's/^D_BOOT=//p' $d/.ccrd/doctor.env)" = "$lboot" ] \
+      && kept="$kept $d" || lost="$lost $d"; done
+    vd=wall; ed="replaced or restarted since the last run; kept:${kept:- nothing}; lost:${lost:- nothing}"
+  elif [ -n "$last" ]; then ed="same machine as the last run ($(( ($(date +%s) - lt) / 60 )) min ago)"
+  else ed="first run"; fi
+  local hints=""; for d in $(cands); do f=$(fstype "$d"); case "$f" in
+    tmpfs) hints="$hints $d=tmpfs(lost)";; overlay) hints="$hints $d=overlay";;
+    *) [ "$(devof "$d")" != "$(devof /)" ] && hints="$hints $d=own-volume($f,$(freegb "$d")G)";; esac; done
+  ed="$ed; / is $root_fs${hints:+;$hints}"
+
+  # (e) memory, swap, disk.
+  local ve=ok ee="" mt ma sw lim="" cg
+  mt=$(awk '/^MemTotal/{print int($2/1024)}' /proc/meminfo); ma=$(awk '/^MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  sw=$(awk '/^SwapTotal/{print int($2/1024)}' /proc/meminfo)
+  cg=$(awk -F: '$1=="0"{print $3}' /proc/self/cgroup); [ -r /sys/fs/cgroup$cg/memory.max ] && lim=$(cat /sys/fs/cgroup$cg/memory.max)
+  [ -z "$lim" ] && { cg=$(awk -F: '$2=="memory"{print $3}' /proc/self/cgroup)
+    for f in /sys/fs/cgroup/memory$cg/memory.limit_in_bytes /sys/fs/cgroup/memory/memory.limit_in_bytes; do [ -r $f ] && { lim=$(cat $f); break; }; done; }
+  case "$lim" in ""|max) lim="";; *) [ "$lim" -gt $((1<<50)) ] && lim="" || lim=$((lim/1048576));; esac
+  ee="mem ${ma}/${mt} MB free${lim:+, cgroup limit ${lim} MB}, swap ${sw} MB, mlock $(ulimit -l)"
+  { [ "$mt" -lt 8000 ] || [ "$ma" -lt 3000 ] || { [ -n "$lim" ] && [ "$lim" -lt 8000 ]; }; } && { ve=wall; ee="$ee (small: low-memory settings)"; }
+  if [ "$sw" = 0 ] && [ -n "$UID0" ] && command -v mkswap >/dev/null; then
+    local sf; sf=$(keep_dir /dev/null)/.ccrd-swaptest; local err
+    dd if=/dev/zero of=$sf bs=1M count=16 status=none 2>/dev/null && chmod 600 $sf && mkswap $sf >/dev/null 2>&1 \
+      && err=$(swapon $sf 2>&1) && { swapoff $sf; ee="$ee, swapon works"; } || ee="$ee, swapon refused${err:+ (${err##*: })}"
+    rm -f $sf
+  fi
+  local shm; shm=$(df -BM --output=size /dev/shm 2>/dev/null | tail -1 | tr -dc 0-9)
+  local kd; kd=$(keep_dir /dev/null)
+  ee="$ee; disk / $(freegb /)G, /tmp $(freegb /tmp)G, $kd $(freegb "$kd")G, /dev/shm ${shm:-?}M, $(nproc) CPUs"
+  [ "$(freegb "$kd")" -lt 8 ] 2>/dev/null && { ve=wall; ee="$ee (less than 8 GB where the desktop would live)"; }
+  [ -n "$shm" ] && [ "$shm" -lt 256 ] && { ve=wall; ee="$ee (/dev/shm under 256 MB: Chrome crashes)"; }
+
+  # (b) proxy, once the probes are back.
+  [ -n "$probes" ] && wait $probes 2>/dev/null
+  local vb=ok eb="" up="" ws="" wsh=""
+  if [ -n "$PROXY" ]; then
+    local ph=${PROXY#*://}; case "$ph" in *@*) eb="password in the proxy URL (hidden)"; ph=${ph#*@};; esac; ph=${ph%%/*}
+    eb="proxy $ph${eb:+, $eb}"
+    local it ig; it=$(cat $T/iss_ts 2>/dev/null); ig=$(cat $T/iss_gh 2>/dev/null)
+    pub(){ echo "$1" | grep -qiE "Let's Encrypt|Google Trust|DigiCert|Sectigo|GlobalSign|Amazon|Cloudflare|ZeroSSL|Entrust|USERTrust|ISRG|GoDaddy|Microsoft"; }
+    if [ -z "$it$ig" ]; then vb=wall
+      case "$(cat $T/ts_rc 2>/dev/null)" in 60|35) eb="$eb; re-signs TLS with a CA this machine doesn't trust ($(grep -m1 '^curl: ' $T/ts_v | cut -c1-70))";;
+        *) eb="$eb; HTTPS through it failed ($(grep -m1 '^curl: ' $T/ts_v | cut -c1-70))";; esac
+    else
+      pub "$it" || { vb=wall; eb="$eb; re-signs Tailscale's TLS (issuer: ${it:0:60})"; }
+      pub "$ig" || { vb=wall; eb="$eb; re-signs other sites (issuer: ${ig:0:40}; the desktop must trust its CA)"; INTERCEPT=1; }
+      pub "$it" && pub "$ig" && eb="$eb; no TLS interception"
+    fi
+    up=$(sed -n '/^HTTP\/1.1 [^2]/{s/^HTTP\/1.1 \([0-9]*\).*/\1/p;q}' $T/up_h 2>/dev/null)
+    ws=$(sed -n '/^HTTP\/1.1 [^2]/{s/^HTTP\/1.1 \([0-9]*\).*/\1/p;q}' $T/ws_h 2>/dev/null)
+    [ "$up" = 101 ] && eb="$eb; Tailscale's upgrade ok" || { vb=wall; eb="$eb; Tailscale's upgrade refused (${up:-no answer})"; }
+    if [ "$ws" = 101 ]; then grep -qi '^upgrade:' $T/ws_h && eb="$eb; WebSocket ok" || { wsh=stripped; eb="$eb; WebSocket 101 but Upgrade headers stripped"; }
+    else vb=wall; eb="$eb; WebSocket refused (${ws:-no answer})"; fi
+    if [ -n "$dk" ] && echo "$ph" | grep -q '[a-z]'; then
+      local hn=${ph%%:*} img; img=$(timeout 5 docker images -q 2>/dev/null | head -1)
+      if [ -n "$img" ]; then local a b; a=$(getent hosts "$hn" | awk '{print $1;exit}')
+        b=$(timeout 20 docker run --rm --entrypoint getent "$img" hosts "$hn" 2>/dev/null | awk '{print $1;exit}')
+        [ "$a" = "$b" ] && eb="$eb; same proxy address in containers" || { vb=wall; PROXY_NAME_WRONG=1; eb="$eb; proxy name is $a here, ${b:-unresolved} in containers"; }
+      else eb="$eb; container name lookup not tested (no local image; up pins the address anyway)"; fi
+    fi
+  else
+    local dc; dc=$(cat $T/direct 2>/dev/null)
+    case "$dc" in 2*|3*|4*) eb="no proxy; direct HTTPS ok";; *) vb=wall; eb="no proxy and no direct HTTPS (${dc:-no answer})";; esac
+  fi
+
+  line a processes $va "$ea"; line b proxy $vb "$eb"; line c root $vc "$ec"; line d machine $vd "$ed"; line e memory $ve "$ee"
+
+  # Leave this run's markers (and results) in every candidate folder.
+  local dirs; dirs=$(cands | paste -sd,)
+  for d in $(cands); do mkdir -p $d/.ccrd 2>/dev/null && [ -w $d/.ccrd ] && cat > $d/.ccrd/doctor.env <<EOF
+D_TIME=$(date +%s)
+D_BOOT=$boot
+D_MID=$mid
+D_PID=$spid
+D_PSTART=$sstart
+D_DIRS=$dirs
+A=$va
+B=$vb
+C=$vc
+D=$vd
+E=$ve
+UPGRADE=${up:-}
+INTERCEPT=$INTERCEPT
+PROXY_NAME_WRONG=$PROXY_NAME_WRONG
+WS=${ws:-}${wsh:+-$wsh}
+DOCKER=$dk
+SYSTEMD=$([ "$(cat /proc/1/comm 2>/dev/null)" = systemd ] && [ -d /run/systemd/system ] && echo 1)
+NSDIFF=$nsd
+MEM_TOTAL=$mt
+MEM_AVAIL=$ma
+MEM_LIMIT=$lim
+KEPT=${kept# }
+EOF
+  done
+  rm -rf $T
+}
+
+# ---- Choosing how to run it ---------------------------------------------------------------------------------
+plan(){
+  local S; S=$(state_dir); [ -n "$S" ] && . $S/doctor.env
+  K=$(keep_dir <(echo "$KEPT" | tr ' ' '\n'))
+  M=$CCRD_METHOD
+  if [ -z "$M" ]; then
+    if [ -n "$UID0" ] && [ -x /opt/ccrd/desktop-on.sh ]; then M=native
+    elif [ -n "$UID0" ] && [ -n "$SYSTEMD" ]; then M=image
+    elif [ -z "$UID0" ] && [ -n "$DOCKER" ]; then M=docker
+    elif [ -n "$UID0" ] && command -v apt-get >/dev/null && [ "$C" = ok ]; then M=native
+    elif [ -n "$UID0" ]; then M=image
+    elif [ -n "$DOCKER" ]; then M=docker
+    else M=none; fi
+  fi
+  case $M in
+    image) KEEPER=$([ -n "$SYSTEMD" ] && echo systemd-service || echo none);;
+    docker) KEEPER=container; [ "$A" = wall ] || [ -n "$CCRD_TURN_BOUND" ] && KEEPER="container + ccrd stay";;
+    native) KEEPER=keepawake;;
+    *) KEEPER=none;;
+  esac
+  NET=direct; WS_ENV=""
+  if [ -n "$PROXY" ]; then NET=proxy
+    [ "$UPGRADE" != 101 ] && { WS_ENV=1; NET="proxy, Tailscale over WebSocket"; }
+  fi
+  LOWMEM=""; [ "$E" = wall ] && LOWMEM=1
+  echo "plan: method=$M keeper=$KEEPER keep=$K network=$NET memory=$([ -n "$LOWMEM" ] && echo 'low (1280x720, 20 fps)' || echo normal)"
+}
+
+# ---- Running a command where the desktop lives --------------------------------------------------------------
+load_up(){ local S; S=$(state_dir); [ -f "$S/up.env" ] && . "$S/up.env"; M=${M:-$CCRD_METHOD}; }
+X(){ case $M in
+  docker) docker exec ccrd "$@";;
+  image) chroot "$K/ccrd-root/rootfs" "$@";;
+  *) "$@";; esac; }
+
+up_docker(){
+  local IMAGE=${CCRD_IMAGE:-ghcr.io/claudes-computer/claudes-computer} CA PROXY_IP="" h
+  CA=${CCRD_PROXY_CA:-$(ls /usr/local/share/ca-certificates/*.crt 2>/dev/null | head -1)}
+  [ -n "$PROXY" ] && { h=${PROXY#*://}; h=${h#*@}; h=${h%%[:/]*}; echo "$h" | grep -q '[a-z]' && PROXY_IP=$(getent hosts "$h" | awk '{print $1; exit}'); }
+  [ -n "$CCRD_UPDATE" ] && { docker pull -q "$IMAGE" >/dev/null && docker rm -f ccrd >/dev/null 2>&1; }   # state and home are kept
+  if docker ps --format '{{.Names}}' | grep -qx ccrd; then docker exec ccrd /opt/ccrd/desktop-on.sh >/dev/null 2>&1
+  else
+    docker rm -f ccrd >/dev/null 2>&1; mkdir -p "$K/ccrd-state"
+    echo "Getting the desktop (the first time, a few GB)..."
+    docker pull -q "$IMAGE" >/dev/null || { echo "FAILED: couldn't download $IMAGE"; return 1; }
+    docker run -d --name ccrd --restart unless-stopped --shm-size=$([ -n "$LOWMEM" ] && echo 1g || echo 2g) \
+      -v "$K/ccrd-state:/state" -v ccrd-home:/home/desk \
+      ${CA:+-v "$CA:/usr/local/share/ca-certificates/sandbox-proxy.crt:ro"} \
+      ${PROXY:+-e HTTPS_PROXY="$PROXY" -e https_proxy="$PROXY" -e NO_PROXY=localhost,127.0.0.1} \
+      ${PROXY_IP:+-e CCRD_PROXY_IP="$PROXY_IP"} ${WS_ENV:+-e TS_CONTROL_WEBSOCKET=1 -e TS_DERP_WEBSOCKET=1} \
+      ${LOWMEM:+-e CCRD_LOW_MEMORY=1 -e CCRD_SCREEN=1280x720 -e CCRD_FPS=20 -e CCRD_KBPS=3000} \
+      -e CCRD_NAME="$CCRD_NAME" ${CCRD_TZ:+-e CCRD_TZ="$CCRD_TZ"} ${CCRD_TS_AUTHKEY:+-e CCRD_TS_AUTHKEY="$CCRD_TS_AUTHKEY"} \
+      ${CCRD_DERP_REGION:+-e CCRD_DERP_REGION="$CCRD_DERP_REGION"} ${CCRD_TS_SSH:+-e CCRD_TS_SSH=1} \
+      "$IMAGE" >/dev/null || { echo "FAILED: docker run"; return 1; }
+  fi
+  local TS="docker exec ccrd /opt/ccrd/tailscale --socket=/opt/ccrd/ts.sock" i link
+  for i in $(seq 1 60); do $TS status >/dev/null 2>&1 && return 0
+    link=$(docker logs ccrd 2>&1 | grep -o 'https://login.tailscale.com/[^ ]*' | tail -1); [ -n "$link" ] && return 0; sleep 5; done
+}
+up_image(){
+  export HOME=$K CCRD_TS_SSH=${CCRD_TS_SSH:-1}
+  [ -n "$WS_ENV" ] && export TS_CONTROL_WEBSOCKET=1 TS_DERP_WEBSOCKET=1
+  [ -n "$LOWMEM" ] && export CCRD_LOW_MEMORY=1 CCRD_SCREEN=${CCRD_SCREEN:-1280x720} CCRD_FPS=${CCRD_FPS:-20} CCRD_KBPS=${CCRD_KBPS:-3000}
+  bash "$HERE/keep-in-home.sh" "${CCRD_NAME:-sandbox}" >/dev/null 2>&1
+  "$K/computer/start" ${CCRD_UPDATE:+--update} >/dev/null 2>&1
+}
+up_native(){
+  [ -x /opt/ccrd/desktop-on.sh ] || bash "$HERE/install.sh" > /tmp/ccrd-install.log 2>&1 || { echo "FAILED: install (see /tmp/ccrd-install.log)"; tail -2 /tmp/ccrd-install.log; return 1; }
+  [ -n "$LOWMEM" ] && { touch /opt/ccrd/ccrd.conf; grep -q '^CCRD_LOW_MEMORY=' /opt/ccrd/ccrd.conf || echo CCRD_LOW_MEMORY=1 >> /opt/ccrd/ccrd.conf; }
+  /opt/ccrd/desktop-on.sh > /tmp/ccrd-up.log 2>&1
+  echo "keeper: run /opt/ccrd/keepawake.sh in the background (it ends IDLE when nobody watches)"
+}
+
+# ---- The report: the same 8 lines everywhere ----------------------------------------------------------------
+report(){
+  load_up; K=${K:-$(keep_dir /dev/null)}; local S; S=$(state_dir)
+  [ -f "$S/doctor.env" ] && . "$S/doctor.env"
+  local TS="/opt/ccrd/tailscale --socket=/opt/ccrd/ts.sock" st ip name link up="" x
+  name=$(X /opt/ccrd/computer-name.sh 2>/dev/null)
+  echo "ccrd $(git -C "$REPO" log -1 --format=%h 2>/dev/null) method=${M:-none} keeper=${KEEPER:-none} name=${name:-?} keep=$K"
+  if X $TS status >/dev/null 2>&1; then ip=$(X $TS ip -4 2>/dev/null); st="READY: on Tailscale as $name ($ip)"
+  else
+    case $M in docker) link=$(docker logs ccrd 2>&1 | grep -o 'https://login.tailscale.com/[^ ]*' | tail -1);;
+      image) link=$(grep -o 'https://login.tailscale.com/[^ ]*' $K/ccrd-root/start.log 2>/dev/null | tail -1);;
+      *) link=$(grep -ho 'https://login.tailscale.com/[^ ]*' /tmp/ccrd-up.log /opt/ccrd/tailscale-up.log 2>/dev/null | tail -1);; esac
+    [ -n "$link" ] && st="SIGN IN: $link" || st="NOT UP"; fi
+  echo "$st"
+  echo "walls: a=${A:-?} b=${B:-?} c=${C:-?} d=${D:-?} e=${E:-?} (ccrd doctor for evidence)"
+  echo "machine: up $(awk '{print int($1/60)}' /proc/uptime) min, mem $(awk '/^MemAvailable/{print int($2/1024)}' /proc/meminfo)/$(awk '/^MemTotal/{print int($2/1024)}' /proc/meminfo) MB free, swap $(awk '/^SwapTotal/{print int($2/1024)}' /proc/meminfo) MB, $K $(freegb "$K") GB free"
+  for x in Xvfb xfce4-session selkies tailscaled pulseaudio; do X pgrep -f "$x" >/dev/null 2>&1 && up="$up $x=up" || up="$up $x=DOWN"; done
+  echo "running:$up"
+  local relay; relay=$(X $TS status --json 2>/dev/null | grep -m1 '"Relay"' | sed 's/.*: *"\([^"]*\)".*/\1/')
+  local pg; pg=$(X curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:6081/ 2>/dev/null); [ "${pg:-000}" = 000 ] && pg=none
+  echo "desktop page: $pg${relay:+, relay $relay}"
+  local m=""; case $M in
+    docker) m=$(docker logs ccrd 2>&1 | grep -iE "error|fatal|fail" | tail -1);;
+    image) m=$(grep -hiE "error|fatal|fail|NOT UP" $K/ccrd-root/start.log $K/ccrd-root/update.log 2>/dev/null | tail -1);;
+    *) m=$(grep -hiE "error|fatal|fail" /tmp/ccrd-up.log 2>/dev/null | tail -1);; esac
+  echo "last error: ${m:-none}" | cut -c1-160 | sed -E 's#://[^/@ ]+:[^/@ ]+@#://***@#g'
+  local fix=""; [ "$B" = wall ] && [ "$UPGRADE" != 101 ] && fix="Tailscale over WebSocket"
+  [ -n "$INTERCEPT" ] && fix="${fix:+$fix, }proxy CA trusted in the desktop"
+  [ -n "$PROXY_NAME_WRONG" ] && fix="${fix:+$fix, }proxy address pinned in the container"
+  [ "$E" = wall ] && fix="${fix:+$fix, }low-memory settings"
+  [ "$D" != ok ] && [ "$M" = image ] && fix="${fix:+$fix, }re-run 'ccrd up' after each replacement"
+  echo "settings for the walls: ${fix:-none needed}"
+}
+
+case "$1" in
+  doctor) doctor;;
+  up)
+    [ "$2" = --update ] && export CCRD_UPDATE=1
+    doctor >/dev/null; plan
+    [ "$2" = --plan ] && exit 0
+    case $M in docker) up_docker;; image) up_image;; native) up_native;; *) echo "FAILED: no way to run a desktop here (ccrd doctor shows why)"; exit 1;; esac
+    for d in $(cands); do [ -O $d/.ccrd ] && printf 'M=%s\nK=%s\nKEEPER=%q\n' "$M" "$K" "$KEEPER" > $d/.ccrd/up.env; done
+    report;;
+  report) report;;
+  stay) load_up; case $M in
+      docker) docker exec -e IDLE_LIMIT=${IDLE_LIMIT:-900} -e MAX=${MAX:-1500} ccrd /opt/ccrd/keepawake.sh | tail -1 | sed 's/^REARM.*/AGAIN: still in use/';;
+      *) X /opt/ccrd/keepawake.sh | tail -1;; esac;;
+  stop) load_up; case $M in docker) docker stop ccrd >/dev/null && echo stopped;; image) bash "$HERE/run-from-image.sh" stop;;
+      *) echo "native desktop: stop it with the session";; esac;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//';;
+esac

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["cloud/run-from-image.sh", "cloud/keep-in-home.sh", ".github/workflows/run-from-image.yml"]
+    paths: ["cloud/run-from-image.sh", "cloud/keep-in-home.sh", "cloud/ccrd", ".github/workflows/run-from-image.yml"]
 permissions:
   contents: read
 jobs:
@@ -28,6 +28,14 @@ jobs:
           pgrep -a xfce4-session
           for i in $(seq 1 30); do c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6081/); [ "$c" = 200 ] && break; sleep 5; done
           echo "desktop page: $c"; [ "$c" = 200 ]
+      - name: ccrd doctor, plan and report on the same machine
+        run: |
+          sudo CCRD_KEEP=/mnt/h cloud/ccrd doctor
+          sudo CCRD_KEEP=/mnt/h cloud/ccrd doctor | grep '^(a) processes ok'
+          sudo CCRD_KEEP=/mnt/h cloud/ccrd up --plan | grep '^plan: method=image'
+          printf 'M=image\nK=/mnt/h\nKEEPER=systemd-service\n' | sudo tee /mnt/h/.ccrd/up.env >/dev/null
+          sudo CCRD_KEEP=/mnt/h cloud/ccrd report | tee rep.txt
+          [ "$(wc -l < rep.txt)" = 8 ]; grep -qE '^(SIGN IN|READY)' rep.txt; grep -q 'xfce4-session=up' rep.txt
       - name: The inbox copies a new picture onto the desktop
         run: |
           sudo cp tv-app/res/drawable/*.png /mnt/inbox/test.png 2>/dev/null || printf 'RIFF....WEBP' | sudo tee /mnt/inbox/test.webp >/dev/null
