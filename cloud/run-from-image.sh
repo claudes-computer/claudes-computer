@@ -62,7 +62,8 @@ mount -t proc proc $F/proc
 mount --rbind /sys $F/sys && mount --make-rslave $F/sys
 mount --rbind /dev $F/dev && mount --make-rslave $F/dev
 mount -t tmpfs -o mode=755 tmpfs $F/run
-mount -t tmpfs -o mode=1777,size=1g tmpfs $F/tmp
+# /tmp is a folder in the kept area, not memory: its logs survive for a look afterwards, and it costs no RAM.
+rm -rf $R/tmp; mkdir -p $R/tmp; chmod 1777 $R/tmp; mount --bind $R/tmp $F/tmp
 cp -L /etc/resolv.conf $F/etc/resolv.conf 2>/dev/null
 cp -L /etc/hosts $F/etc/hosts 2>/dev/null
 # This machine's proxy certificates: docker-start.sh trusts whatever is in this folder.
