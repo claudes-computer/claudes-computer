@@ -1,0 +1,110 @@
+diff -ruN a/control/controlhttp/client.go b/control/controlhttp/client.go
+--- a/control/controlhttp/client.go	2026-11-26 18:00:34.725085916 -0800
++++ b/control/controlhttp/client.go	2026-11-26 18:00:34.880026339 -0800
+@@ -68,7 +68,19 @@
+ 	if a.Hostname == "" {
+ 		return nil, errors.New("required Dialer.Hostname empty")
+ 	}
+-	return a.dial(ctx)
++	if controlWebsocketFirst() {
++		return a.dialWebsocket(ctx)
++	}
++	c, err := a.dial(ctx)
++	if wantsWebsocketFallback(err) {
++		a.logf("controlhttp: protocol upgrade refused (%v); trying WebSocket", err)
++		if wc, werr := a.dialWebsocket(ctx); werr == nil {
++			return wc, nil
++		} else {
++			a.logf("controlhttp: WebSocket failed too: %v", werr)
++		}
++	}
++	return c, err
+ }
+ 
+ func (a *Dialer) logf(format string, args ...any) {
+diff -ruN a/control/controlhttp/client_ws.go b/control/controlhttp/client_ws.go
+--- a/control/controlhttp/client_ws.go	1969-12-31 16:00:00.000000000 -0800
++++ b/control/controlhttp/client_ws.go	2026-11-26 18:00:34.862901301 -0800
+@@ -0,0 +1,82 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++//go:build !js
++
++package controlhttp
++
++// A WebSocket fallback for the control connection, for machines behind an HTTP proxy that intercepts TLS and
++// refuses Tailscale's own protocol upgrade (POST /ts2021, "Upgrade: tailscale-control-protocol") but allows
++// WebSockets, as in some sandboxes for AI agents. It is the transport the js/wasm client always uses
++// (client_js.go), and control servers already accept it. The Noise protocol runs inside, so an intercepting
++// proxy still can't read or change the conversation.
++//
++// It's tried after the normal dial fails, or first with TS_CONTROL_WEBSOCKET=1.
++
++import (
++	"context"
++	"crypto/tls"
++	"encoding/base64"
++	"net"
++	"net/http"
++	"net/url"
++	"strings"
++
++	"github.com/coder/websocket"
++	"tailscale.com/control/controlbase"
++	"tailscale.com/control/controlhttp/controlhttpcommon"
++	"tailscale.com/envknob"
++	"tailscale.com/net/wsconn"
++)
++
++var controlWebsocketFirst = envknob.RegisterBool("TS_CONTROL_WEBSOCKET")
++
++// wantsWebsocketFallback reports whether err looks like a proxy refusing the protocol upgrade.
++func wantsWebsocketFallback(err error) bool {
++	return err != nil && strings.Contains(err.Error(), "unexpected HTTP response")
++}
++
++func (a *Dialer) dialWebsocket(ctx context.Context) (*ClientConn, error) {
++	init, cont, err := controlbase.ClientDeferred(a.MachineKey, a.ControlKey, a.ProtocolVersion)
++	if err != nil {
++		return nil, err
++	}
++	host := a.Hostname
++	if a.HTTPSPort != "" && a.HTTPSPort != "443" && a.HTTPSPort != NoPort {
++		host = net.JoinHostPort(host, a.HTTPSPort)
++	}
++	u := &url.URL{
++		Scheme: "wss",
++		Host:   host,
++		Path:   serverUpgradePath,
++		RawQuery: url.Values{
++			controlhttpcommon.HandshakeHeaderName: []string{base64.StdEncoding.EncodeToString(init)},
++		}.Encode(),
++	}
++	proxy := a.getProxyFunc()
++	if proxy == nil {
++		proxy = http.ProxyFromEnvironment
++	}
++	// WebSockets need HTTP/1.1. A proxy that intercepts TLS may offer HTTP/2 even where the real server doesn't,
++	// and the handshake then hangs: offer only HTTP/1.1, and leave Go's HTTP/2 off for this one transport.
++	hc := &http.Client{Transport: &http.Transport{
++		Proxy:           proxy,
++		TLSClientConfig: &tls.Config{NextProtos: []string{"http/1.1"}},
++		TLSNextProto:    map[string]func(string, *tls.Conn) http.RoundTripper{},
++	}}
++	ws, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{
++		Subprotocols: []string{controlhttpcommon.UpgradeHeaderValue},
++		HTTPClient:   hc,
++	})
++	if err != nil {
++		return nil, err
++	}
++	nc := wsconn.NetConn(context.Background(), ws, websocket.MessageBinary, u.String())
++	cc, err := cont(ctx, nc)
++	if err != nil {
++		nc.Close()
++		return nil, err
++	}
++	a.logf("controlhttp: connected over WebSocket")
++	return &ClientConn{Conn: cc}, nil
++}
