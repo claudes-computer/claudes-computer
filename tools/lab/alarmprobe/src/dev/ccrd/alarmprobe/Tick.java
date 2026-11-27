@@ -20,7 +20,7 @@ public class Tick extends BroadcastReceiver {
             android.util.Log.i("AlarmProbe", "alarm screen=" + (screenOn ? "on" : "off") + " connect=" + tryConnect(host, port));
             done.finish();
             try { Thread.sleep(20000); } catch (InterruptedException e) { }
-            android.util.Log.i("AlarmProbe", "20s-later screen=" + (screenOn ? "on" : "off") + " connect=" + tryConnect(host, port));
+            android.util.Log.i("AlarmProbe", "20s-later screen=" + (((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isInteractive() ? "on" : "off") + " connect=" + tryConnect(host, port));
         } }).start();
     }
     static String tryConnect(String host, int port) {

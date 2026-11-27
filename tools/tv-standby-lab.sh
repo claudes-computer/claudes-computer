@@ -64,6 +64,12 @@ sh settings put global low_power_standby_enabled 1
 adb reboot; sleep 15; booted; sleep 25; root; wake_tv
 say "overlay state: $(sh cmd overlay list android | grep -i ccrd | tr '\n' ' ')"
 say "after restart: supported=$(v mSupportedConfig) enabled=$(v mIsEnabled) custom-policy=$(v mEnableCustomPolicy) timeout-ms=$(v mStandbyTimeoutConfig)"
+# The custom-policy switch sometimes doesn't survive the restart; without it every policy below is ignored.
+for i in 1 2 3 4 5; do
+  [ "$(v mEnableCustomPolicy)" = true ] && break
+  sh device_config put low_power_standby enable_policy true; sleep 5
+done
+say "custom policy now: $(v mEnableCustomPolicy)"
 lps > "$OUT/lps-1-on.txt"
 [ "$(v mSupportedConfig)" = true ] || { say "couldn't turn it on here (the overlay didn't take). Stopping."; cat "$OUT/lps-1-on.txt" >> "$OUT/summary.txt"; exit 0; }
 [ "$(v mIsEnabled)" = true ] || say "enable via the power manager: $(tool enable true)"
@@ -98,11 +104,13 @@ if [ -n "$ALARM_APK" ] && [ -n "$PROBE" ]; then
   say "install alarm probe: $(T=300 adb install -r --no-streaming "$ALARM_APK" 2>&1 | tail -1)"
   for reasons in 7 1; do
     wake_tv; tool policy "alarm_test_$reasons" - $reasons >/dev/null; sh settings put global low_power_standby_enabled 1
-    adb logcat -c; sh am start -n dev.ccrd.alarmprobe/.Start --es host "$PROBE" --ei port "$PP" --ei every 45 >/dev/null; sleep 5
+    adb logcat -c; sh am start -n dev.ccrd.alarmprobe/.Start --es host "$PROBE" --ei port "$PP" --ei every 45 >/dev/null
+    sleep 75   # one alarm with the screen on: the control (the probe must be able to connect at all)
     sh input keyevent SLEEP; sleep 170
     adb logcat -d -s AlarmProbe:I | grep -o "AlarmProbe: .*" > "$OUT/alarm-reasons-$reasons.txt"
+    say "allowed reasons $reasons, control (screen on): $(grep -c 'screen=on connect=OK' "$OUT/alarm-reasons-$reasons.txt") connected, $(grep -c 'screen=on connect=FAIL' "$OUT/alarm-reasons-$reasons.txt") failed"
     say "allowed reasons $reasons (standby active=$(v mIsActive)): at the alarm: $(grep -c 'alarm screen=off connect=OK' "$OUT/alarm-reasons-$reasons.txt") connected, $(grep -c 'alarm screen=off connect=FAIL' "$OUT/alarm-reasons-$reasons.txt") blocked; 20 s later: $(grep -c '20s-later screen=off connect=OK' "$OUT/alarm-reasons-$reasons.txt") connected, $(grep -c '20s-later screen=off connect=FAIL' "$OUT/alarm-reasons-$reasons.txt") blocked"
-    sed 's/^/    /' "$OUT/alarm-reasons-$reasons.txt" | head -12 >> "$OUT/summary.txt"
+    sed 's/^/    /' "$OUT/alarm-reasons-$reasons.txt" | head -16 >> "$OUT/summary.txt"
   done
   wake_tv; sh am force-stop dev.ccrd.alarmprobe
 fi
