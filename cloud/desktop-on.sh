@@ -65,7 +65,8 @@ if ! swapon --show | grep -q /swapfile; then
 fi 2>/dev/null
 
 # ---- Screen, desktop, sound, printing -----------------------------------------------------------------------
-pgrep -x Xvfb >/dev/null || { (as setsid Xvfb :1 -screen 0 1920x1080x24 >/tmp/xvfb.log 2>&1 &); sleep 2; }
+# CCRD_SCREEN (ccrd.conf): the screen size, e.g. 1280x720 on a machine with little CPU (less to encode).
+pgrep -x Xvfb >/dev/null || { (as setsid Xvfb :1 -screen 0 ${CCRD_SCREEN:-1920x1080}x24 >/tmp/xvfb.log 2>&1 &); sleep 2; }
 # Sound first, so the panel's volume control finds it when the desktop starts.
 pgrep -x pulseaudio >/dev/null || as pulseaudio --start --exit-idle-time=-1 2>/dev/null
 pgrep -x xfce4-session >/dev/null || (as setsid dbus-launch startxfce4 >/tmp/xfce.log 2>&1 &)
@@ -163,6 +164,10 @@ pgrep -f "^python3 -m http.server 6083" >/dev/null \
 
 # HTTPS address on the tailnet (https://<name>.<tailnet>.ts.net), so any browser on your Tailscale can open the
 # desktop: phones and tablets need a secure address to play the stream. Tailnet-only, certificate from Tailscale.
+# CCRD_DERP_REGION (ccrd.conf): the relay region to use when this machine can't connect directly (sandboxes whose
+# proxy only passes WebSockets). Tailscale otherwise picks one by measured latency, which a proxy can distort.
+# Tailscale forgets this setting when it restarts, so it's applied on every run.
+[ -n "$CCRD_DERP_REGION" ] && $TS debug force-prefer-derp "$CCRD_DERP_REGION" >/dev/null 2>&1
 (sleep 8; $TS serve status 2>/dev/null | grep -q 6081 \
   || $TS serve --bg --https=443 http://127.0.0.1:6081 >/dev/null 2>&1) &
 
