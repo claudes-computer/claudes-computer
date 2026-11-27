@@ -1,6 +1,6 @@
-From b5b3a65acbbe5c31c916dffedc1f0e7d93f9a1fb Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Thu, 26 Nov 2026 18:48:44 -0800
+From 12401fb2f2d6e9f5a77d003d633adfafa56beb3a Mon Sep 17 00:00:00 2001
+From: Drew <stuckdrew@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 19:01:47 -0800
 Subject: [PATCH] control/controlhttp, feature/controlwebsocket: add opt-in
  WebSocket fallback for control
 
@@ -21,7 +21,6 @@ attempt's transport (dialer, proxy, TLS settings, HTTP/1.1 only).
 
 Like derpwebsocket, neither tailscaled nor tsnet links it in. Without
 the import, behavior is unchanged.
-
 ---
  control/controlhttp/client.go                 |  34 ++++
  feature/controlwebsocket/controlwebsocket.go  |  17 ++
