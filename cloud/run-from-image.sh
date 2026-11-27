@@ -75,19 +75,25 @@ fi
 # ---- Get the image (first time, or --update) ---------------------------------------------------------------
 if [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; then
   echo "Getting the desktop image (about 1.3 GB to download, 3.2 GB unpacked)..."
-  command -v skopeo >/dev/null && command -v umoci >/dev/null \
-    || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq skopeo umoci >/dev/null; } \
-    || { echo "Couldn't install skopeo and umoci (needed to unpack the image)"; exit 1; }
+  # crane (Google's go-containerregistry): one self-contained program, kept in the kept folder, so neither apt nor
+  # anything outside it is needed, before or after the machine is replaced.
+  CR=$R/bin/crane
+  if [ ! -x $CR ]; then
+    mkdir -p $R/bin && curl -fsSL https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz \
+      | tar -xz -C $R/bin crane && chmod 755 $CR || { echo "FAILED: couldn't download crane from github.com"; exit 1; }
+  fi
   mkdir -p $R && stop
-  export TMPDIR=$R/.tmp; rmtree $TMPDIR $R/.oci $R/.new; mkdir -p $TMPDIR
-  skopeo copy -q "docker://$IMAGE" "oci:$R/.oci:latest" && umoci unpack --image "$R/.oci:latest" $R/.new >/dev/null \
-    || { echo "Couldn't download or unpack $IMAGE"; rmtree $TMPDIR $R/.oci $R/.new; exit 1; }
+  rmtree $R/.new $R/.oci $R/.tmp; mkdir -p $R/.new/rootfs
+  # export flattens the image's layers into one filesystem; tar keeps owners and permissions.
+  $CR export "$IMAGE" - | tar -x --numeric-owner -p -C $R/.new/rootfs \
+    && [ -x $R/.new/rootfs/opt/ccrd/desktop-on.sh ] \
+    || { echo "FAILED: couldn't download or unpack $IMAGE"; rmtree $R/.new; exit 1; }
   # Keep what belongs to this computer: the Tailscale identity (/state) and the desktop user's files.
   if [ -d $F ]; then
     for k in state home/desk; do [ -d $F/$k ] && { rmtree $R/.new/rootfs/$k; mv $F/$k $R/.new/rootfs/$k; }; done
     rmtree $R/.old; mv $F $R/.old
   fi
-  mv $R/.new/rootfs $F; rmtree $R/.new $R/.oci $R/.old $TMPDIR; unset TMPDIR
+  mv $R/.new/rootfs $F; rmtree $R/.new $R/.old
   echo "Unpacked into $F"
 fi
 
