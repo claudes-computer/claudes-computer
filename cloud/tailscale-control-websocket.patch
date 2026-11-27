@@ -6,6 +6,7 @@
 # - Relay: Tailscale's own feature/derpwebsocket, linked in, plus TS_DERP_WEBSOCKET=1 (WebSocket first).
 # - net/wsfix (local): does the WebSocket handshake itself, so a proxy that drops the Connection/Upgrade headers
 #   from the 101 response (seen in another agent sandbox) doesn't break it. Used by both fallbacks.
+# - net/tshttpproxy (local): never log proxy credentials (the URL's password, or part of the auth header).
 diff -ruN -x state -x 'tailscale*-ws' a/cmd/tailscaled/websockets.go b/cmd/tailscaled/websockets.go
 --- a/cmd/tailscaled/websockets.go	1969-12-31 16:00:00.000000000 -0800
 +++ b/cmd/tailscaled/websockets.go	2026-11-26 20:29:03.604302564 -0800
@@ -572,6 +573,36 @@ diff -ruN -x state -x 'tailscale*-ws' a/feature/derpwebsocket/upgrade_notjs.go b
  		Subprotocols: []string{"derp"},
  		// WireGuard packets don't compress.
  		CompressionMode: websocket.CompressionDisabled,
+diff -ruN -x state -x 'tailscale*-ws' a/net/tshttpproxy/tshttpproxy.go b/net/tshttpproxy/tshttpproxy.go
+--- a/net/tshttpproxy/tshttpproxy.go	2026-11-26 13:35:07.858758115 -0800
++++ b/net/tshttpproxy/tshttpproxy.go	2026-11-27 09:11:24.669550913 -0800
+@@ -217,7 +217,7 @@
+ 	tr.GetProxyConnectHeader = func(ctx context.Context, proxyURL *url.URL, target string) (http.Header, error) {
+ 		v, err := GetAuthHeader(proxyURL)
+ 		if err != nil {
+-			log.Printf("failed to get proxy Auth header for %v; ignoring: %v", proxyURL, err)
++			log.Printf("failed to get proxy Auth header for %v; ignoring: %v", proxyURL.Redacted(), err)
+ 			return nil, nil
+ 		}
+ 		if v == "" {
+@@ -226,12 +226,12 @@
+ 		return http.Header{proxyAuthHeader: []string{v}}, nil
+ 	}
+ 	tr.OnProxyConnectResponse = func(ctx context.Context, proxyURL *url.URL, connectReq *http.Request, res *http.Response) error {
+-		auth := connectReq.Header.Get(proxyAuthHeader)
+-		const truncLen = 20
+-		if len(auth) > truncLen {
+-			auth = fmt.Sprintf("%s...(%d total bytes)", auth[:truncLen], len(auth))
++		// Local change: never log credentials (the URL's password, or any part of the auth header).
++		auth := "none"
++		if v := connectReq.Header.Get(proxyAuthHeader); v != "" {
++			auth = fmt.Sprintf("set, %d bytes", len(v))
+ 		}
+-		log.Printf("tshttpproxy: CONNECT response from %v for target %q (auth %q): %v", proxyURL, connectReq.Host, auth, res.Status)
++		log.Printf("tshttpproxy: CONNECT response from %v for target %q (auth %s): %v", proxyURL.Redacted(), connectReq.Host, auth, res.Status)
+ 		return nil
+ 	}
+ }
 diff -ruN -x state -x 'tailscale*-ws' a/net/wsfix/wsfix.go b/net/wsfix/wsfix.go
 --- a/net/wsfix/wsfix.go	1969-12-31 16:00:00.000000000 -0800
 +++ b/net/wsfix/wsfix.go	2026-11-27 06:25:30.441648605 -0800
