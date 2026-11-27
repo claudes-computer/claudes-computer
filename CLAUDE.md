@@ -35,7 +35,7 @@ addresses are private: never put them in this repository.
 - Won't open ("it beeps") and nothing else can install it: the user installs the official Tailscale app on the TV,
   signs in, opens `http://<this machine's tailnet IP>:6083/cc.apk` in Downloader, installs over the top, then turns
   the Tailscale app off. Copy the newest build into /opt/ccrd/tv first.
-- "Update the TVs" → `/opt/ccrd/tv-update.sh`: sends the newest build (in /opt/ccrd/tv) to every TV that's on; the app must be open
+- "Update the TVs" → `/opt/ccrd/tv-update.sh`: sends the newest build (in /opt/ccrd/tv) to every TV that's on (a new build means both files: `cc.apk`, and `cc-old.apk` built with `APP_ID=com.walt.desktop` for TVs still on the old app id); the app must be open
   on that TV (Android shows the install screen only for the app in front). With the helper set up, the update installs
   and the app reopens by itself; without it, the person confirms Android's install screen and opens the app again. A TV whose app is too old for that: in
   Downloader on that TV, with the app running, open `http://127.0.0.1:16082/assets/tv.apk`.
