@@ -101,6 +101,10 @@ These work, but they're rougher, and nothing here is needed. Ask Claude for any 
   - **The house's fast lane:** the TV can carry the connection itself through your router, instead of a relay far
     away. It tries this on its own when the router allows it (NAT-PMP, which many routers have off).
   - **No Tailscale sign-in on a fresh computer:** ask Claude to "skip the sign-in next time".
+- **The desktop as a Docker image**, for a machine where you can run Docker but aren't root (some other agents'
+  cloud machines), or any Linux box: `docker run -d --name ccrd --shm-size=2g -v ccrd-state:/state -v ccrd-home:/home/desk ghcr.io/claudes-computer/claudes-computer`,
+  then `docker logs -f ccrd` for the Tailscale sign-in link. Settings and proxy notes are at the top of the
+  [Dockerfile](Dockerfile). The TV app shows one computer today, so this is for trying things out.
 - **The TV's microphone** on the desktop: **Ctrl+Alt+M** turns it on and off (a badge shows while it's on).
 
 **Coming soon:** more than one computer, managed from the TV: start a new one, name it, archive it, switch between
