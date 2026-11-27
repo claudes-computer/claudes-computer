@@ -2,6 +2,9 @@
 # Chrome on the desktop. It browses through your home connection when that works right now (Tailscale exit node,
 # reached through the local SOCKS port :1055), and through this machine's own web proxy otherwise.
 [ -f /opt/ccrd/proxy.env ] && . /opt/ccrd/proxy.env
+# Started by a root shell, Chrome can inherit certificate settings that point at files the desktop user can't read;
+# the home-route check below would then fail and Chrome would browse through the cloud machine instead.
+for v in CURL_CA_BUNDLE SSL_CERT_FILE NIX_SSL_CERT_FILE; do [ -n "${!v}" ] && [ ! -r "${!v}" ] && unset $v; done
 # Started from outside the desktop (by Claude, a script), Chrome would miss the session's sound and accessibility
 # bus: take them from the running desktop session.
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
