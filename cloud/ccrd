@@ -21,7 +21,7 @@
 # last one, so its second run (in a later command, or after a replacement) turns "unknown" into wall or ok.
 #
 # Settings come from the environment, or from a host's config file (CCRD_CONF, default ./ccrd.conf): CCRD_NAME,
-# CCRD_KEEP (the folder that survives), CCRD_METHOD (native|image|docker), CCRD_TURN_BOUND=1 (the machine sleeps
+# CCRD_KEEP (the folder that survives), CCRD_WALLPAPER (a 1920x1080 picture), CCRD_METHOD (native|image|docker), CCRD_TURN_BOUND=1 (the machine sleeps
 # when the agent's turn ends), CCRD_TZ, CCRD_INBOX, CCRD_WALLPAPER, CCRD_DERP_REGION, CCRD_TS_AUTHKEY, DOCKER_HOST.
 # Never prints tokens or proxy passwords.
 HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd); REPO=$(dirname "$HERE")
@@ -265,6 +265,7 @@ up_docker(){
       ${LOWMEM:+-e CCRD_LOW_MEMORY=1 -e CCRD_SCREEN=1280x720 -e CCRD_FPS=20 -e CCRD_KBPS=3000} \
       -e CCRD_NAME="$CCRD_NAME" ${CCRD_TZ:+-e CCRD_TZ="$CCRD_TZ"} ${CCRD_TS_AUTHKEY:+-e CCRD_TS_AUTHKEY="$CCRD_TS_AUTHKEY"} \
       ${CCRD_DERP_REGION:+-e CCRD_DERP_REGION="$CCRD_DERP_REGION"} ${CCRD_TS_SSH:+-e CCRD_TS_SSH=1} \
+      $([ -f "$CCRD_WALLPAPER" ] && printf -- '-v %s:/opt/ccrd/wallpaper.png:ro' "$CCRD_WALLPAPER") \
       "$IMAGE" >/dev/null || { echo "FAILED: docker run"; return 1; }
   fi
   local TS="docker exec ccrd /opt/ccrd/tailscale --socket=/opt/ccrd/ts.sock" i link
@@ -280,6 +281,7 @@ up_image(){
 }
 up_native(){
   [ -x /opt/ccrd/desktop-on.sh ] || bash "$HERE/install.sh" > /tmp/ccrd-install.log 2>&1 || { echo "FAILED: install (see /tmp/ccrd-install.log)"; tail -2 /tmp/ccrd-install.log; return 1; }
+  [ -f "$CCRD_WALLPAPER" ] && install -m 644 "$CCRD_WALLPAPER" /opt/ccrd/wallpaper.png
   [ -n "$LOWMEM" ] && { touch /opt/ccrd/ccrd.conf; grep -q '^CCRD_LOW_MEMORY=' /opt/ccrd/ccrd.conf || echo CCRD_LOW_MEMORY=1 >> /opt/ccrd/ccrd.conf; }
   /opt/ccrd/desktop-on.sh > /tmp/ccrd-up.log 2>&1
   echo "keeper: run /opt/ccrd/keepawake.sh in the background (it ends IDLE when nobody watches)"
