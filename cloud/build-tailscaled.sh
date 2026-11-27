@@ -7,7 +7,7 @@
 set -e
 V=${TS_VERSION:-1.106.0}; HERE=$(cd "$(dirname "$0")" && pwd)
 # Everything Go downloads and compiles goes to a throwaway folder, removed at the end (it's several GB).
-W=$(mktemp -d /tmp/ts-build.XXXXXX); trap 'chmod -R u+w "$W" 2>/dev/null; rm -rf "$W"' EXIT
+W=$(mktemp -d "${TMPDIR:-/tmp}/ts-build.XXXXXX")   # TMPDIR: some sandboxes have a small /tmp; trap 'chmod -R u+w "$W" 2>/dev/null; rm -rf "$W"' EXIT
 export GOPATH=$W/gopath GOCACHE=$W/cache GOFLAGS=-mod=mod CGO_ENABLED=0
 go mod download tailscale.com@v$V
 SRC=$(go env GOMODCACHE)/tailscale.com@v$V

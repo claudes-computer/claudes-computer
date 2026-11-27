@@ -118,7 +118,7 @@ if [ -f /root/.ccr/ca-bundle.crt ]; then
   rm -rf "$C"
 fi
 # Other sandboxes put their proxy's certificate in the system store: trust those in the desktop's browsers too.
-for f in /usr/local/share/ca-certificates/*proxy*.crt; do
+for f in /usr/local/share/ca-certificates/*.crt; do   # e.g. *proxy*.crt (Codex), *egress-ca.crt
   [ -f "$f" ] || continue
   certutil -d sql:$H/.pki/nssdb -A -t "C,," -n "sandbox-$(basename "$f" .crt)" -i "$f" || true
   install -m 644 "$f" $D/sandbox-ca-$(basename "$f" .crt).pem
