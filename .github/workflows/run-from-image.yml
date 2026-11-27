@@ -56,3 +56,5 @@ jobs:
       - if: failure()
         run: |
           sudo tail -60 /mnt/h/ccrd-root/start.log || true
+          sudo tail -40 /mnt/h/ccrd-root/update.log || true
+          sudo journalctl -u ccrd-update -u ccrd-desktop --no-pager | tail -40 || true
