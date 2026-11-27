@@ -43,6 +43,14 @@ jobs:
           grep -q '^SIGN IN:' out2.txt; ! grep -q 'Getting the desktop image' out2.txt
           for i in $(seq 1 24); do pgrep -x xfce4-session >/dev/null && break; sleep 5; done
           pgrep -a xfce4-session; echo "restart took $(( $(date +%s) - start )) s"
+      - name: Update to the newest image (as Muse does), keeping the identity and the desktop's files
+        run: |
+          sudo touch /mnt/h/ccrd-root/rootfs/home/desk/keep-me
+          sudo /mnt/h/computer/start --update | tee out3.txt
+          grep -q '^SIGN IN:\|^READY' out3.txt
+          sudo test -f /mnt/h/ccrd-root/rootfs/home/desk/keep-me
+          for i in $(seq 1 24); do pgrep -x xfce4-session >/dev/null && break; sleep 5; done; pgrep -a xfce4-session
+          ! grep -q " /mnt/h/ccrd-root/.old" /proc/mounts
       - name: The short report
         run: sudo /mnt/h/computer/start report
       - if: failure()

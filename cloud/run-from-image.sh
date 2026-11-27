@@ -55,6 +55,23 @@ report(){
 }
 case "$1" in stop) stop; echo stopped; exit 0;; status) status; exit;; report) report; exit 0;; esac
 
+# The settings a service started from here needs.
+svc_envs(){ envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE \
+  CCRD_INBOX CCRD_INBOX_NAME HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done; }
+
+# Getting the image takes minutes. Where systemd runs the machine, that happens in its own service too, so a sandbox
+# that ends long commands can't cut the download off. Its output: $R/update.log.
+if { [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; } && [ -z "$CCRD_IN_UPDATE$CCRD_IN_SERVICE" ] && has_systemd; then
+  mkdir -p $R; svc_envs; : > $R/update.log
+  systemctl stop ccrd-update 2>/dev/null; systemctl reset-failed ccrd-update 2>/dev/null
+  systemd-run --unit=ccrd-update --collect -E CCRD_IN_UPDATE=1 -E CCRD_ROOT_LOG=$R/update.log "${envs[@]}" \
+    bash -c 'exec bash "$0" "$@" >> "$CCRD_ROOT_LOG" 2>&1' "$(readlink -f "$0")" "$@" >/dev/null 2>&1 \
+    || { echo "FAILED: couldn't start the systemd service ccrd-update"; exit 1; }
+  echo "Getting the desktop image as the systemd service ccrd-update (several minutes; progress in $R/update.log)..."
+  for i in $(seq 1 240); do systemctl is-active -q ccrd-update || break; sleep 5; done
+  tail -3 $R/update.log; status 24; exit
+fi
+
 # ---- Get the image (first time, or --update) ---------------------------------------------------------------
 if [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; then
   echo "Getting the desktop image (about 1.3 GB to download, 3.2 GB unpacked)..."
@@ -86,8 +103,7 @@ if [ -n "$(inside)" ] && $TS status >/dev/null 2>&1; then echo "Already running.
 # (some sandboxes end everything a command started, and give each command its own view of the mounts).
 if [ -z "$CCRD_IN_SERVICE" ] && has_systemd; then
   stop
-  envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE CCRD_INBOX CCRD_INBOX_NAME \
-                    HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done
+  svc_envs
   : > $R/start.log
   systemd-run --unit=$SVC --collect -p Restart=on-failure -p RestartSec=10 -E CCRD_IN_SERVICE=1 "${envs[@]}" \
     bash "$(readlink -f "$0")" >/dev/null 2>&1 || { echo "FAILED: couldn't start the systemd service $SVC"; exit 1; }
