@@ -68,7 +68,8 @@ if { [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; } && [ -z "$CCRD
     bash -c 'exec bash "$0" "$@" >> "$CCRD_ROOT_LOG" 2>&1' "$(readlink -f "$0")" "$@" >/dev/null 2>&1 \
     || { echo "FAILED: couldn't start the systemd service ccrd-update"; exit 1; }
   echo "Getting the desktop image as the systemd service ccrd-update (several minutes; progress in $R/update.log)..."
-  for i in $(seq 1 240); do systemctl is-active -q ccrd-update || break; sleep 5; done
+  sleep 2   # it reports "activating" before "active": wait while it's either
+  for i in $(seq 1 240); do case "$(systemctl show -p ActiveState --value ccrd-update 2>/dev/null)" in active|activating|reloading) sleep 5;; *) break;; esac; done
   tail -3 $R/update.log; status 24; exit
 fi
 
