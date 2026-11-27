@@ -1,9 +1,11 @@
 # Tailscale with the WebSocket fallbacks, for machines behind a proxy that intercepts TLS and refuses Tailscale's own
 # upgrades but passes WebSockets (some AI agents' sandboxes). Applied by build-tailscaled.sh after the relay patch.
-# - Control: tailscale/tailscale#22643 (NightFeather0615) as it stands, unchanged: hook in control/controlhttp and
+# - Control: tailscale/tailscale#22643 (NightFeather0615): hook in control/controlhttp and
 #   the opt-in feature/controlwebsocket package. Plus one local line: TS_CONTROL_WEBSOCKET=1 goes straight to
 #   WebSocket, skipping the request that's certain to be refused.
 # - Relay: Tailscale's own feature/derpwebsocket, linked in, plus TS_DERP_WEBSOCKET=1 (WebSocket first).
+# - net/wsfix (local): does the WebSocket handshake itself, so a proxy that drops the Connection/Upgrade headers
+#   from the 101 response (seen in another agent sandbox) doesn't break it. Used by both fallbacks.
 diff -ruN -x state -x 'tailscale*-ws' a/cmd/tailscaled/websockets.go b/cmd/tailscaled/websockets.go
 --- a/cmd/tailscaled/websockets.go	1969-12-31 16:00:00.000000000 -0800
 +++ b/cmd/tailscaled/websockets.go	2026-11-26 20:29:03.604302564 -0800
@@ -437,10 +439,69 @@ diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/controlwebsocke
 +	}
 +	ts.checkUpgrades(t, 1, 1)
 +}
+diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/stripped_test.go b/feature/controlwebsocket/stripped_test.go
+--- a/feature/controlwebsocket/stripped_test.go	1969-12-31 16:00:00.000000000 -0800
++++ b/feature/controlwebsocket/stripped_test.go	2026-11-27 06:25:30.467843289 -0800
+@@ -0,0 +1,55 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++//go:build !js
++
++package controlwebsocket
++
++import (
++	"context"
++	"crypto/sha1"
++	"encoding/base64"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/coder/websocket"
++	"tailscale.com/net/wsfix"
++)
++
++// TestProxyStrippedUpgradeHeaders checks the local header repair: a proxy that switches protocols but drops the
++// hop-by-hop "Connection" and "Upgrade" headers from the 101 response.
++func TestProxyStrippedUpgradeHeaders(t *testing.T) {
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		h := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
++		conn, bw, err := w.(http.Hijacker).Hijack()
++		if err != nil {
++			t.Error(err)
++			return
++		}
++		defer conn.Close()
++		bw.WriteString("HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: " +
++			base64.StdEncoding.EncodeToString(h[:]) + "\r\nSec-WebSocket-Protocol: tailscale-control-protocol\r\n\r\n")
++		bw.Flush()
++		time.Sleep(time.Second)
++	}))
++	defer srv.Close()
++	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ts2021"
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	opts := func(hc *http.Client) *websocket.DialOptions {
++		return &websocket.DialOptions{HTTPClient: hc, Subprotocols: []string{"tailscale-control-protocol"}}
++	}
++	if _, _, err := websocket.Dial(ctx, u, opts(&http.Client{})); err == nil {
++		t.Fatal("plain client accepted the stripped response; this test no longer shows anything")
++	} else {
++		t.Logf("without the repair: %v", err)
++	}
++	c, _, err := websocket.Dial(ctx, u, opts(wsfix.Client(&http.Client{})))
++	if err != nil {
++		t.Fatalf("with the repair: %v", err)
++	}
++	c.CloseNow()
++}
 diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/upgrade_notjs.go b/feature/controlwebsocket/upgrade_notjs.go
 --- a/feature/controlwebsocket/upgrade_notjs.go	1969-12-31 16:00:00.000000000 -0800
-+++ b/feature/controlwebsocket/upgrade_notjs.go	2026-11-26 20:28:53.198507101 -0800
-@@ -0,0 +1,49 @@
++++ b/feature/controlwebsocket/upgrade_notjs.go	2026-11-27 06:25:30.473648607 -0800
+@@ -0,0 +1,50 @@
 +// Copyright (c) Tailscale Inc & contributors
 +// SPDX-License-Identifier: BSD-3-Clause
 +
@@ -459,6 +520,7 @@ diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/upgrade_notjs.g
 +	"tailscale.com/control/controlhttp/controlhttpcommon"
 +	"tailscale.com/feature"
 +	"tailscale.com/net/wsconn"
++	"tailscale.com/net/wsfix"
 +)
 +
 +func init() {
@@ -474,7 +536,7 @@ diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/upgrade_notjs.g
 +// WebSocket messages.
 +func upgrade(ctx context.Context, hc *http.Client, urlStr string) (net.Conn, error) {
 +	wc, _, err := websocket.Dial(ctx, urlStr, &websocket.DialOptions{
-+		HTTPClient:   hc,
++		HTTPClient:   wsfix.Client(hc),
 +		Subprotocols: []string{controlhttpcommon.UpgradeHeaderValue},
 +		// Noise messages don't compress.
 +		CompressionMode: websocket.CompressionDisabled,
@@ -490,3 +552,242 @@ diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/upgrade_notjs.g
 +	// The conn outlives the handshake, so don't bind it to ctx.
 +	return wsconn.NetConn(context.Background(), wc, websocket.MessageBinary, remoteAddr), nil
 +}
+diff -ruN -x state -x 'tailscale*-ws' a/feature/derpwebsocket/upgrade_notjs.go b/feature/derpwebsocket/upgrade_notjs.go
+--- a/feature/derpwebsocket/upgrade_notjs.go	2026-11-26 13:35:07.842138547 -0800
++++ b/feature/derpwebsocket/upgrade_notjs.go	2026-11-27 06:25:30.473648607 -0800
+@@ -16,6 +16,7 @@
+ 	"tailscale.com/derp/derphttp"
+ 	"tailscale.com/feature"
+ 	"tailscale.com/net/wsconn"
++	"tailscale.com/net/wsfix"
+ )
+ 
+ func init() {
+@@ -44,7 +45,7 @@
+ 		},
+ 	}
+ 	wc, _, err := websocket.Dial(ctx, urlStr, &websocket.DialOptions{
+-		HTTPClient:   hc,
++		HTTPClient:   wsfix.Client(hc),
+ 		Subprotocols: []string{"derp"},
+ 		// WireGuard packets don't compress.
+ 		CompressionMode: websocket.CompressionDisabled,
+diff -ruN -x state -x 'tailscale*-ws' a/net/wsfix/wsfix.go b/net/wsfix/wsfix.go
+--- a/net/wsfix/wsfix.go	1969-12-31 16:00:00.000000000 -0800
++++ b/net/wsfix/wsfix.go	2026-11-27 06:25:30.441648605 -0800
+@@ -0,0 +1,215 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++// Package wsfix makes WebSocket handshakes work through proxies that switch protocols but drop the hop-by-hop
++// "Connection" and "Upgrade" headers from the 101 response (seen in some AI agent sandboxes). net/http only
++// hands over the connection of a 101 response that has both headers, so this does the handshake itself: it
++// dials as the given *http.Transport would (its dialer, proxy with CONNECT and credentials, TLS settings), writes
++// the request, reads the response leniently, and gives the WebSocket library a response it accepts.
++// Local addition to this project's Tailscale build, not part of upstream Tailscale.
++package wsfix
++
++import (
++	"bufio"
++	"context"
++	"crypto/tls"
++	"encoding/base64"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"net/url"
++	"time"
++)
++
++// Client returns a client for websocket.Dial that does the handshake as described in the package comment.
++// If hc's transport isn't an *http.Transport, hc is returned unchanged.
++func Client(hc *http.Client) *http.Client {
++	if hc == nil {
++		hc = &http.Client{}
++	}
++	tr, ok := hc.Transport.(*http.Transport)
++	if hc.Transport == nil {
++		tr, ok = http.DefaultTransport.(*http.Transport), true
++	}
++	if !ok {
++		return hc
++	}
++	c := *hc
++	c.Transport = roundTripper{tr}
++	return &c
++}
++
++type roundTripper struct{ tr *http.Transport }
++
++func (rt roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
++	ctx := req.Context()
++	conn, err := rt.dial(ctx, req)
++	if err != nil {
++		return nil, err
++	}
++	if d, ok := ctx.Deadline(); ok {
++		conn.SetDeadline(d)
++	} else {
++		conn.SetDeadline(time.Now().Add(30 * time.Second))
++	}
++	br := bufio.NewReader(conn)
++	if err := req.Write(conn); err != nil {
++		conn.Close()
++		return nil, err
++	}
++	resp, err := http.ReadResponse(br, req)
++	if err != nil {
++		conn.Close()
++		return nil, err
++	}
++	conn.SetDeadline(time.Time{})
++	if resp.StatusCode != http.StatusSwitchingProtocols {
++		resp.Body = closeBoth{resp.Body, conn}
++		return resp, nil
++	}
++	if resp.Header.Get("Connection") == "" {
++		resp.Header.Set("Connection", "Upgrade")
++	}
++	if resp.Header.Get("Upgrade") == "" {
++		resp.Header.Set("Upgrade", "websocket")
++	}
++	resp.Body = rwc{br, conn}
++	return resp, nil
++}
++
++func hostPort(u *url.URL) string {
++	if u.Port() != "" {
++		return u.Host
++	}
++	if u.Scheme == "https" || u.Scheme == "wss" {
++		return net.JoinHostPort(u.Hostname(), "443")
++	}
++	return net.JoinHostPort(u.Hostname(), "80")
++}
++
++func (rt roundTripper) dial(ctx context.Context, req *http.Request) (net.Conn, error) {
++	tr := rt.tr
++	dialer := tr.DialContext
++	if dialer == nil {
++		dialer = (&net.Dialer{}).DialContext
++	}
++	secure := req.URL.Scheme == "https" || req.URL.Scheme == "wss"
++	addr := hostPort(req.URL)
++	var proxyURL *url.URL
++	if tr.Proxy != nil {
++		var err error
++		if proxyURL, err = tr.Proxy(req); err != nil {
++			return nil, err
++		}
++	}
++	var conn net.Conn
++	var err error
++	switch {
++	case proxyURL != nil:
++		if conn, err = dialer(ctx, "tcp", hostPort(proxyURL)); err != nil {
++			return nil, err
++		}
++		if proxyURL.Scheme == "https" {
++			tc := tls.Client(conn, &tls.Config{ServerName: proxyURL.Hostname()})
++			if err := tc.HandshakeContext(ctx); err != nil {
++				conn.Close()
++				return nil, err
++			}
++			conn = tc
++		}
++		if err := connect(ctx, tr, conn, proxyURL, addr); err != nil {
++			conn.Close()
++			return nil, err
++		}
++	case secure && tr.DialTLSContext != nil:
++		return tr.DialTLSContext(ctx, "tcp", addr)
++	default:
++		if conn, err = dialer(ctx, "tcp", addr); err != nil {
++			return nil, err
++		}
++	}
++	if !secure {
++		return conn, nil
++	}
++	cfg := &tls.Config{}
++	if tr.TLSClientConfig != nil {
++		cfg = tr.TLSClientConfig.Clone()
++	}
++	if cfg.ServerName == "" {
++		cfg.ServerName = req.URL.Hostname()
++	}
++	cfg.NextProtos = []string{"http/1.1"}
++	tc := tls.Client(conn, cfg)
++	if err := tc.HandshakeContext(ctx); err != nil {
++		conn.Close()
++		return nil, err
++	}
++	return tc, nil
++}
++
++// connect asks the proxy on conn for a tunnel to addr, with the credentials in proxyURL and the transport's
++// proxy CONNECT headers.
++func connect(ctx context.Context, tr *http.Transport, conn net.Conn, proxyURL *url.URL, addr string) error {
++	hdr := http.Header{}
++	for k, v := range tr.ProxyConnectHeader {
++		hdr[k] = v
++	}
++	if tr.GetProxyConnectHeader != nil {
++		h, err := tr.GetProxyConnectHeader(ctx, proxyURL, addr)
++		if err != nil {
++			return err
++		}
++		for k, v := range h {
++			hdr[k] = v
++		}
++	}
++	if u := proxyURL.User; u != nil && hdr.Get("Proxy-Authorization") == "" {
++		pw, _ := u.Password()
++		hdr.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(u.Username()+":"+pw)))
++	}
++	creq := &http.Request{Method: "CONNECT", URL: &url.URL{Opaque: addr}, Host: addr, Header: hdr}
++	if d, ok := ctx.Deadline(); ok {
++		conn.SetDeadline(d)
++		defer conn.SetDeadline(time.Time{})
++	}
++	if err := creq.Write(conn); err != nil {
++		return err
++	}
++	// Read the reply one byte at a time so nothing after it (the TLS handshake) is left in a buffer.
++	resp, err := http.ReadResponse(bufio.NewReaderSize(oneByteReader{conn}, 16), creq)
++	if err != nil {
++		return err
++	}
++	resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
++	}
++	return nil
++}
++
++type oneByteReader struct{ r io.Reader }
++
++func (o oneByteReader) Read(p []byte) (int, error) {
++	if len(p) == 0 {
++		return 0, nil
++	}
++	return o.r.Read(p[:1])
++}
++
++type rwc struct {
++	r *bufio.Reader
++	c net.Conn
++}
++
++func (x rwc) Read(p []byte) (int, error)  { return x.r.Read(p) }
++func (x rwc) Write(p []byte) (int, error) { return x.c.Write(p) }
++func (x rwc) Close() error                { return x.c.Close() }
++
++type closeBoth struct {
++	io.ReadCloser
++	c net.Conn
++}
++
++func (x closeBoth) Close() error { return errors.Join(x.ReadCloser.Close(), x.c.Close()) }

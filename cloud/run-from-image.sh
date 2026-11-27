@@ -17,7 +17,10 @@ IMAGE=${CCRD_IMAGE:-ghcr.io/claudes-computer/claudes-computer:latest}
 
 inside(){ for p in /proc/[0-9]*; do [ "$(readlink $p/root 2>/dev/null)" = "$F" ] && echo ${p#/proc/}; done; }
 unmount(){ for m in $(awk -v f="$F" '$2 ~ "^"f"/" {print $2}' /proc/mounts | sort -r); do umount -l "$m" 2>/dev/null; done; }
-stop(){ local p; p=$(inside); [ -n "$p" ] && { kill $p 2>/dev/null; sleep 3; p=$(inside); [ -n "$p" ] && kill -9 $p 2>/dev/null; }; unmount; }
+SVC=ccrd-desktop
+has_systemd(){ [ -d /run/systemd/system ] && command -v systemd-run >/dev/null; }
+stop(){ has_systemd && [ -z "$CCRD_IN_SERVICE" ] && { systemctl stop $SVC 2>/dev/null; systemctl reset-failed $SVC 2>/dev/null; }
+  local p; p=$(inside); [ -n "$p" ] && { kill $p 2>/dev/null; sleep 3; p=$(inside); [ -n "$p" ] && kill -9 $p 2>/dev/null; }; unmount; }
 TS="chroot $F /opt/ccrd/tailscale --socket=/opt/ccrd/ts.sock"
 status(){
   for i in $(seq 1 ${1:-1}); do
@@ -32,7 +35,7 @@ status(){
 report(){
   local up m
   echo "uptime_min=$(awk '{print int($1/60)}' /proc/uptime) mem_avail_mb=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo) home_free_gb=$(df -BG --output=avail $R 2>/dev/null | tail -1 | tr -dc 0-9)"
-  echo "unpacked=$([ -x $F/opt/ccrd/desktop-on.sh ] && echo yes || echo no) mounts=$(grep -c " $F/" /proc/mounts)"
+  echo "unpacked=$([ -x $F/opt/ccrd/desktop-on.sh ] && echo yes || echo no) mounts=$(grep -c " $F/" /proc/1/mounts 2>/dev/null) service=$(has_systemd && systemctl is-active $SVC 2>/dev/null || echo none) perms=$(stat -c %a $F 2>/dev/null)/$(stat -c %a $F/usr/bin/env 2>/dev/null)"
   up=""; for x in Xvfb xfce4-session selkies tailscaled pulseaudio; do pgrep -f "$x" >/dev/null && up="$up $x=up" || up="$up $x=DOWN"; done; echo "running:$up"
   echo "tailscale: $($TS status >/dev/null 2>&1 && echo "signed in as $($TS ip -4 2>/dev/null)" || echo "not signed in")"
   echo "desktop_page=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:6081/)"
@@ -67,7 +70,20 @@ if [ -n "$CCRD_IMPORT_STATE" ] && [ -f "$CCRD_IMPORT_STATE/ts.state" ] && [ ! -f
 fi
 
 # ---- Start --------------------------------------------------------------------------------------------------
+chmod 755 $F   # some home folders unpack it without "others may enter", and the desktop runs as an ordinary user
 if [ -n "$(inside)" ] && $TS status >/dev/null 2>&1; then echo "Already running."; status; exit; fi
+# Where systemd runs the machine, the desktop runs as its service: it then outlives the command that started it
+# (some sandboxes end everything a command started, and give each command its own view of the mounts).
+if [ -z "$CCRD_IN_SERVICE" ] && has_systemd; then
+  stop
+  envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE \
+                    HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done
+  : > $R/start.log
+  systemd-run --unit=$SVC --collect -p Restart=on-failure -p RestartSec=10 -E CCRD_IN_SERVICE=1 "${envs[@]}" \
+    bash "$(readlink -f "$0")" >/dev/null 2>&1 || { echo "FAILED: couldn't start the systemd service $SVC"; exit 1; }
+  echo "Starting as the systemd service $SVC (a minute or two)..."
+  status 60; exit
+fi
 stop
 mkdir -p $F/state $F/proc $F/sys $F/dev $F/run $F/tmp
 mount -t proc proc $F/proc
@@ -82,11 +98,17 @@ cp -L /etc/hosts $F/etc/hosts 2>/dev/null
 cp /usr/local/share/ca-certificates/*.crt $F/usr/local/share/ca-certificates/ 2>/dev/null
 P=${HTTPS_PROXY:-$https_proxy}
 : > $R/start.log
-setsid chroot $F /usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+run_inside(){
+  chroot $F /usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
   LANG=C.UTF-8 CCRD_STATE_DIR=/state ${P:+HTTPS_PROXY=$P https_proxy=$P NO_PROXY=localhost,127.0.0.1} \
   ${TS_CONTROL_WEBSOCKET:+TS_CONTROL_WEBSOCKET=$TS_CONTROL_WEBSOCKET} ${TS_DERP_WEBSOCKET:+TS_DERP_WEBSOCKET=$TS_DERP_WEBSOCKET} \
   ${CCRD_NAME:+CCRD_NAME=$CCRD_NAME} ${CCRD_TZ:+CCRD_TZ=$CCRD_TZ} ${CCRD_KBPS:+CCRD_KBPS=$CCRD_KBPS} \
   ${CCRD_FPS:+CCRD_FPS=$CCRD_FPS} ${CCRD_TS_AUTHKEY:+CCRD_TS_AUTHKEY=$CCRD_TS_AUTHKEY} \
-  /opt/claudes-computer/cloud/docker-start.sh >> $R/start.log 2>&1 < /dev/null &
+  /opt/claudes-computer/cloud/docker-start.sh >> $R/start.log 2>&1 < /dev/null
+}
+# In the service: stay in the foreground, so the service lives as long as the desktop.
+[ -n "$CCRD_IN_SERVICE" ] && { run_inside; exit; }
+run_inside & disown
+
 echo "Starting (a minute or two)..."
 status 60
