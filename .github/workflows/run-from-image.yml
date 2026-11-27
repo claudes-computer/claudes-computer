@@ -1,0 +1,39 @@
+# Runs the published desktop image without Docker (cloud/run-from-image.sh), as on a sandbox where you're root
+# but only the home folder is kept, and checks that the desktop session itself runs.
+name: Desktop without Docker
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["cloud/run-from-image.sh", ".github/workflows/run-from-image.yml"]
+permissions:
+  contents: read
+jobs:
+  chroot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: First start (downloads and unpacks the image)
+        run: |
+          sudo systemctl stop docker docker.socket 2>/dev/null || true
+          sudo CCRD_ROOT=/mnt/ccrd-root CCRD_NAME=lab bash cloud/run-from-image.sh | tee out.txt
+          grep -q '^SIGN IN: https://login.tailscale.com/' out.txt
+      - name: The desktop session runs
+        run: |
+          for i in $(seq 1 24); do pgrep -x xfce4-session >/dev/null && break; sleep 5; done
+          pgrep -a xfce4-session
+          for i in $(seq 1 30); do c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6081/); [ "$c" = 200 ] && break; sleep 5; done
+          echo "desktop page: $c"; [ "$c" = 200 ]
+      - name: Stop, then start again from the unpacked folder (as after the machine is replaced)
+        run: |
+          sudo CCRD_ROOT=/mnt/ccrd-root bash cloud/run-from-image.sh stop
+          sleep 3; ! pgrep -x xfce4-session
+          start=$(date +%s)
+          sudo CCRD_ROOT=/mnt/ccrd-root CCRD_NAME=lab bash cloud/run-from-image.sh | tee out2.txt
+          grep -q '^SIGN IN:' out2.txt; ! grep -q 'Getting the desktop image' out2.txt
+          for i in $(seq 1 24); do pgrep -x xfce4-session >/dev/null && break; sleep 5; done
+          pgrep -a xfce4-session; echo "restart took $(( $(date +%s) - start )) s"
+      - if: failure()
+        run: |
+          sudo tail -60 /mnt/ccrd-root/start.log || true
