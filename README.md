@@ -105,6 +105,9 @@ These work, but they're rougher, and nothing here is needed. Ask Claude for any 
   cloud machines), or any Linux box: `docker run -d --name ccrd --shm-size=2g -v ccrd-state:/state -v ccrd-home:/home/desk ghcr.io/claudes-computer/claudes-computer`,
   then `docker logs -f ccrd` for the Tailscale sign-in link. Settings and proxy notes are at the top of the
   [Dockerfile](Dockerfile). The TV app shows one computer today, so this is for trying things out.
+- **On other AI agents' machines:** the same desktop on an OpenAI Codex task's machine
+  ([Codex Computer](https://github.com/claudes-computer/codex-computer)) and on Meta AI's Muse agent machine
+  ([Muse Computer](https://github.com/claudes-computer/muse-computer)), each with what that machine needed.
 - **The TV's microphone** on the desktop: **Ctrl+Alt+M** turns it on and off (a badge shows while it's on).
 
 **Coming soon:** more than one computer, managed from the TV: start a new one, name it, archive it, switch between
