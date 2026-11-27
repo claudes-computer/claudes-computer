@@ -13,7 +13,7 @@ cat > $C/start <<EOF
 # Starts or repairs this machine's desktop. Safe to run any time; run it after every machine replacement.
 # A scheduled job may not inherit the shell's proxy settings: take them from the first process if missing.
 [ -z "\$HTTPS_PROXY" ] && eval "\$(tr '\\0' '\\n' < /proc/1/environ | grep -E '^(HTTPS?_PROXY|https?_proxy)=' | sed 's/^/export /')"
-export CCRD_ROOT=$HOME/ccrd-root CCRD_NAME=$N CCRD_TZ=\${CCRD_TZ:-${CCRD_TZ:-UTC}} CCRD_FPS=\${CCRD_FPS:-20} CCRD_KBPS=\${CCRD_KBPS:-3000} CCRD_SCREEN=\${CCRD_SCREEN:-1280x720}${CCRD_DERP_REGION:+ CCRD_DERP_REGION=$CCRD_DERP_REGION}
+export CCRD_ROOT=$HOME/ccrd-root CCRD_NAME=$N CCRD_TZ=\${CCRD_TZ:-${CCRD_TZ:-UTC}} CCRD_FPS=\${CCRD_FPS:-20} CCRD_KBPS=\${CCRD_KBPS:-3000} CCRD_SCREEN=\${CCRD_SCREEN:-1280x720} CCRD_LOW_MEMORY=\${CCRD_LOW_MEMORY:-1}${CCRD_DERP_REGION:+ CCRD_DERP_REGION=$CCRD_DERP_REGION}
 export TS_CONTROL_WEBSOCKET=1 TS_DERP_WEBSOCKET=1${CCRD_INBOX:+ CCRD_INBOX=$CCRD_INBOX CCRD_INBOX_NAME=${CCRD_INBOX_NAME:-Inbox}}
 bash $HERE/run-from-image.sh "\$@" >> $C/start.log 2>&1; r=\$?
 [ "\$1" = report ] || [ "\$1" = stop ] || bash $HERE/run-from-image.sh status | tail -1

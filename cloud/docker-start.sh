@@ -19,7 +19,7 @@ if [ -n "$CCRD_PROXY_IP" ] && [ -n "$HTTPS_PROXY" ]; then
 fi
 # Settings.
 touch $D/ccrd.conf
-for v in CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_PRINTER CCRD_SCREEN CCRD_DERP_REGION; do
+for v in CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_PRINTER CCRD_SCREEN CCRD_DERP_REGION CCRD_LOW_MEMORY; do
   [ -n "${!v}" ] && { sed -i "/^$v=/d" $D/ccrd.conf; printf '%s=%q\n' "$v" "${!v}" >> $D/ccrd.conf; }
 done
 # The Tailscale identity lives in /state (CCRD_STATE_DIR, set by the image): the same computer after a new container.

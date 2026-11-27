@@ -58,11 +58,20 @@ fi
 [ -n "$CCRD_TZ" ] && [ -f "/usr/share/zoneinfo/$CCRD_TZ" ] && ln -sf "/usr/share/zoneinfo/$CCRD_TZ" /etc/localtime
 
 # ---- Swap (8 GB file), so big apps don't run the machine out of memory --------------------------------------
-if ! swapon --show | grep -q /swapfile; then
-  [ -f /swapfile ] || { fallocate -l 8G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile; }
-  swapon /swapfile
-  sysctl -qw vm.swappiness=20
+# Some sandboxes refuse swap ("Operation not permitted"): then the file is removed and not tried again.
+if [ ! -f $D/no-swap ] && ! swapon --show | grep -q /swapfile; then
+  [ -f /swapfile ] || { touch /swapfile; chattr +C /swapfile; fallocate -l 8G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile; }
+  if swapon /swapfile; then sysctl -qw vm.swappiness=20; else rm -f /swapfile; date > $D/no-swap; fi
 fi 2>/dev/null
+
+# ---- Little memory (CCRD_LOW_MEMORY=1 in ccrd.conf, for small or shared machines) -------------------------------
+# Chrome's Memory Saver at its strongest (background tabs give their memory back), set as a policy.
+if [ -n "$CCRD_LOW_MEMORY" ]; then
+  mkdir -p /etc/opt/chrome/policies/managed
+  echo '{"HighEfficiencyModeEnabled": true, "MemorySaverModeSavings": 2}' > /etc/opt/chrome/policies/managed/ccrd-low-memory.json
+else
+  rm -f /etc/opt/chrome/policies/managed/ccrd-low-memory.json
+fi
 
 # ---- Screen, desktop, sound, printing -----------------------------------------------------------------------
 # CCRD_SCREEN (ccrd.conf): the screen size, e.g. 1280x720 on a machine with little CPU (less to encode).
@@ -176,6 +185,11 @@ for i in 1 2 3 4 5; do
   as pactl list short sinks 2>/dev/null | grep -qw output && { as pactl set-default-sink output;
     as pactl set-default-source SelkiesVirtualMic 2>/dev/null; break; }   # the TV's mic, when it sends one
   sleep 2
+done
+
+# Out of memory: the kernel should kill a browser tab before the screen, the stream, the desktop or Tailscale.
+for p in $(pgrep -x Xvfb) $(pgrep -x xfce4-session) $(pgrep -x tailscaled) $(pgrep -x pulseaudio) $(pgrep -f '^/opt/selkies/bin/python3'); do
+  echo -500 > /proc/$p/oom_score_adj 2>/dev/null
 done
 
 # ---- One line for whoever ran this (Claude reads it): is the desktop reachable from the TV? ------------------

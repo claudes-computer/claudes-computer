@@ -57,7 +57,7 @@ case "$1" in stop) stop; echo stopped; exit 0;; status) status; exit;; report) r
 
 # The settings a service started from here needs.
 svc_envs(){ envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE \
-  CCRD_INBOX CCRD_INBOX_NAME CCRD_SCREEN CCRD_DERP_REGION HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done; }
+  CCRD_INBOX CCRD_INBOX_NAME CCRD_SCREEN CCRD_DERP_REGION CCRD_LOW_MEMORY HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done; }
 
 # Getting the image takes minutes. Where systemd runs the machine, that happens in its own service too, so a sandbox
 # that ends long commands can't cut the download off. Its output: $R/update.log.
@@ -139,7 +139,7 @@ run_inside(){
   ${TS_CONTROL_WEBSOCKET:+TS_CONTROL_WEBSOCKET=$TS_CONTROL_WEBSOCKET} ${TS_DERP_WEBSOCKET:+TS_DERP_WEBSOCKET=$TS_DERP_WEBSOCKET} \
   ${CCRD_NAME:+CCRD_NAME=$CCRD_NAME} ${CCRD_TZ:+CCRD_TZ=$CCRD_TZ} ${CCRD_KBPS:+CCRD_KBPS=$CCRD_KBPS} \
   ${CCRD_FPS:+CCRD_FPS=$CCRD_FPS} ${CCRD_TS_AUTHKEY:+CCRD_TS_AUTHKEY=$CCRD_TS_AUTHKEY} \
-  ${CCRD_SCREEN:+CCRD_SCREEN=$CCRD_SCREEN} ${CCRD_DERP_REGION:+CCRD_DERP_REGION=$CCRD_DERP_REGION} \
+  ${CCRD_SCREEN:+CCRD_SCREEN=$CCRD_SCREEN} ${CCRD_DERP_REGION:+CCRD_DERP_REGION=$CCRD_DERP_REGION} ${CCRD_LOW_MEMORY:+CCRD_LOW_MEMORY=$CCRD_LOW_MEMORY} \
   /opt/claudes-computer/cloud/docker-start.sh >> $R/start.log 2>&1 < /dev/null
 }
 # Inbox: CCRD_INBOX is a folder on this machine (outside the desktop) whose pictures and videos should show up on
