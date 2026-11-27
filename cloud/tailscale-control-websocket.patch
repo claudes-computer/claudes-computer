@@ -47,8 +47,8 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client.go t
  func (a *Dialer) logf(format string, args ...any) {
 diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client_ws.go ts-ws/control/controlhttp/client_ws.go
 --- a/control/controlhttp/client_ws.go	1969-12-31 16:00:00.000000000 -0800
-+++ b/control/controlhttp/client_ws.go	2026-11-26 13:35:08.160520728 -0800
-@@ -0,0 +1,75 @@
++++ b/control/controlhttp/client_ws.go	2026-11-26 16:23:04.176952804 -0800
+@@ -0,0 +1,82 @@
 +// Copyright (c) Tailscale Inc & contributors
 +// SPDX-License-Identifier: BSD-3-Clause
 +
@@ -66,6 +66,7 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client_ws.g
 +
 +import (
 +	"context"
++	"crypto/tls"
 +	"encoding/base64"
 +	"net"
 +	"net/http"
@@ -107,7 +108,13 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client_ws.g
 +	if proxy == nil {
 +		proxy = http.ProxyFromEnvironment
 +	}
-+	hc := &http.Client{Transport: &http.Transport{Proxy: proxy, ForceAttemptHTTP2: false}}
++	// WebSockets need HTTP/1.1. A proxy that intercepts TLS may offer HTTP/2 even where the real server doesn't,
++	// and the handshake then hangs: offer only HTTP/1.1, and leave Go's HTTP/2 off for this one transport.
++	hc := &http.Client{Transport: &http.Transport{
++		Proxy:           proxy,
++		TLSClientConfig: &tls.Config{NextProtos: []string{"http/1.1"}},
++		TLSNextProto:    map[string]func(string, *tls.Conn) http.RoundTripper{},
++	}}
 +	ws, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{
 +		Subprotocols: []string{controlhttpcommon.UpgradeHeaderValue},
 +		HTTPClient:   hc,
@@ -159,3 +166,86 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/derp/derphttp/derphttp_client.g
  	return client, connGen, err
  }
  
+diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/feature/derpwebsocket/upgrade_notjs.go ts-ws/feature/derpwebsocket/upgrade_notjs.go
+--- a/feature/derpwebsocket/upgrade_notjs.go	2026-11-26 13:35:07.842138547 -0800
++++ b/feature/derpwebsocket/upgrade_notjs.go	2026-11-26 14:22:39.464207196 -0800
+@@ -13,9 +13,11 @@
+ 	"sync/atomic"
+ 
+ 	"github.com/coder/websocket"
++	"sync"
+ 	"tailscale.com/derp/derphttp"
+ 	"tailscale.com/feature"
+ 	"tailscale.com/net/wsconn"
++	"time"
+ )
+ 
+ func init() {
+@@ -31,11 +33,12 @@
+ // in binary WebSocket messages.
+ func upgrade(ctx context.Context, conn net.Conn, urlStr string) (net.Conn, error) {
+ 	var used atomic.Bool
++	bundled := newBundler(conn)
+ 	dial := func(context.Context, string, string) (net.Conn, error) {
+ 		if used.Swap(true) {
+ 			return nil, errors.New("DERP websocket handshake tried to dial a second connection")
+ 		}
+-		return conn, nil
++		return bundled, nil
+ 	}
+ 	hc := &http.Client{
+ 		Transport: &http.Transport{
+@@ -54,3 +57,53 @@
+ 	}
+ 	return wsconn.NetConn(context.Background(), wc, websocket.MessageBinary, urlStr), nil
+ }
++
++// bundler collects the WebSocket library's small writes (it writes frames in 4 KB pieces) and passes them on
++// together, at 64 KB or after 300 µs, whichever comes first. Some HTTP proxies have a cost per write that
++// otherwise caps the connection at a few Mbit/s. (ccrd patch)
++type bundler struct {
++	net.Conn
++	mu      sync.Mutex
++	buf     []byte
++	pending bool
++	err     error
++}
++
++func newBundler(c net.Conn) *bundler { return &bundler{Conn: c, buf: make([]byte, 0, 64<<10)} }
++
++func (b *bundler) Write(p []byte) (int, error) {
++	b.mu.Lock()
++	defer b.mu.Unlock()
++	if b.err != nil {
++		return 0, b.err
++	}
++	if len(b.buf)+len(p) > cap(b.buf) {
++		if err := b.flushLocked(); err != nil {
++			return 0, err
++		}
++		if len(p) >= cap(b.buf) {
++			return b.Conn.Write(p)
++		}
++	}
++	b.buf = append(b.buf, p...)
++	if !b.pending {
++		b.pending = true
++		time.AfterFunc(300*time.Microsecond, func() {
++			b.mu.Lock()
++			defer b.mu.Unlock()
++			b.pending = false
++			b.flushLocked()
++		})
++	}
++	return len(p), nil
++}
++
++func (b *bundler) flushLocked() error {
++	if len(b.buf) == 0 || b.err != nil {
++		return b.err
++	}
++	_, err := b.Conn.Write(b.buf)
++	b.buf = b.buf[:0]
++	b.err = err
++	return err
++}
