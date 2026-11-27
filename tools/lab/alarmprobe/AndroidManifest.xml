@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A lab-only test app (tools/tv-standby-lab.sh): does an app that wakes itself with an exact alarm get a short
+     network window while the TV is in Low Power Standby? Never shipped. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.ccrd.alarmprobe">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application android:label="Alarm probe" android:usesCleartextTraffic="true">
+        <activity android:name=".Start" android:exported="true"/>
+        <receiver android:name=".Tick" android:exported="false"/>
+    </application>
+</manifest>

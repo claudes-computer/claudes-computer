@@ -3,7 +3,7 @@
 # answer to it.
 #   tools/tv-standby-lab.sh <claudes-computer.apk> [output dir]
 # with LPS_DEX (tools/lab/Lps.java built to a dex), LPS_OVERLAY (tools/lab/lps-overlay built to an apk) and a
-# listener on the test host at PROBE_PORT (default 8099).
+# listener on the test host at PROBE_PORT (default 8099). ALARM_APK (tools/lab/alarmprobe built to an apk) adds test D.
 # TV makers turn on Android's Low Power Standby: seconds after the screen goes off, apps that aren't on screen lose
 # the network. Stock images ship with it off, so this turns it on (a framework config overlay, as root), then:
 #   A. shows the cut-off happening to our app with no exemption,
@@ -88,6 +88,24 @@ say "--- C. no exempt list, cut-off switched off (the fallback)"
 wake_tv; tool policy plain '' 0 >/dev/null; sh settings put global low_power_standby_enabled 0; sleep 2
 sleep_tv 20; say "screen off:  app $(reach $U)   (enabled=$(v mIsEnabled) active=$(v mIsActive))"
 wake_tv; sh settings put global low_power_standby_enabled 1
+
+# D. No exemption at all, but the app wakes itself with exact alarms. An alarm puts the app on Android's temporary
+# allow list for about 10 seconds; the "Optimized" and "Increased" Energy modes let that list through (allowed
+# reasons 7), "Low" doesn't (allowed reasons 1). If this works, an app can get a short network window every minute
+# on any TV, with no setup. ALARM_APK is tools/lab/alarmprobe.
+if [ -n "$ALARM_APK" ] && [ -n "$PROBE" ]; then
+  say "--- D. no exemption; the app wakes itself with an alarm every 45 s"
+  say "install alarm probe: $(T=300 adb install -r --no-streaming "$ALARM_APK" 2>&1 | tail -1)"
+  for reasons in 7 1; do
+    wake_tv; tool policy "alarm_test_$reasons" '' $reasons >/dev/null; sh settings put global low_power_standby_enabled 1
+    adb logcat -c; sh am start -n dev.ccrd.alarmprobe/.Start --es host "$PROBE" --ei port "$PP" --ei every 45 >/dev/null; sleep 5
+    sh input keyevent SLEEP; sleep 170
+    adb logcat -d -s AlarmProbe:I | grep -o "AlarmProbe: .*" > "$OUT/alarm-reasons-$reasons.txt"
+    say "allowed reasons $reasons (standby active=$(v mIsActive)): at the alarm: $(grep -c 'alarm screen=off connect=OK' "$OUT/alarm-reasons-$reasons.txt") connected, $(grep -c 'alarm screen=off connect=FAIL' "$OUT/alarm-reasons-$reasons.txt") blocked; 20 s later: $(grep -c '20s-later screen=off connect=OK' "$OUT/alarm-reasons-$reasons.txt") connected, $(grep -c '20s-later screen=off connect=FAIL' "$OUT/alarm-reasons-$reasons.txt") blocked"
+    sed 's/^/    /' "$OUT/alarm-reasons-$reasons.txt" | head -12 >> "$OUT/summary.txt"
+  done
+  wake_tv; sh am force-stop dev.ccrd.alarmprobe
+fi
 
 A=$(grep -A2 '^--- A' "$OUT/summary.txt" | grep 'screen off' | grep -o 'app [A-Z]*' | head -1)
 B=$(grep -A3 '^--- B' "$OUT/summary.txt" | grep 'screen off' | grep -o 'app [A-Z]*' | head -1)

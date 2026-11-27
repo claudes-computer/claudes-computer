@@ -37,6 +37,12 @@ jobs:
           $BT/aapt2 link -I "$J" --manifest tools/lab/lps-overlay/AndroidManifest.xml -o lps/u.apk lps/res.zip --min-sdk-version 33 --target-sdk-version 34
           keytool -genkeypair -keystore lps/k.jks -storepass android -alias a -keyalg RSA -validity 9999 -dname CN=lab >/dev/null 2>&1
           $BT/zipalign -f 4 lps/u.apk lps/a.apk && $BT/apksigner sign --ks lps/k.jks --ks-pass pass:android --out lps/overlay.apk lps/a.apk && ls -la lps/overlay.apk
+          mkdir -p lps/ap/classes lps/ap/dex
+          $BT/aapt2 link -I "$J" --manifest tools/lab/alarmprobe/AndroidManifest.xml -o lps/ap/base.apk --min-sdk-version 23 --target-sdk-version 28
+          javac -nowarn -source 8 -target 8 -bootclasspath "$J" -d lps/ap/classes $(find tools/lab/alarmprobe/src -name '*.java')
+          $BT/d8 --lib "$J" --min-api 23 --output lps/ap/dex $(find lps/ap/classes -name '*.class')
+          cp lps/ap/base.apk lps/ap/u.apk && zip -q -j lps/ap/u.apk lps/ap/dex/classes.dex
+          $BT/zipalign -f 4 lps/ap/u.apk lps/ap/a.apk && $BT/apksigner sign --ks lps/k.jks --ks-pass pass:android --out lps/alarmprobe.apk lps/ap/a.apk && ls -la lps/alarmprobe.apk
       - name: Cuttlefish host tools
         run: |
           sudo curl -fsSL https://us-apt.pkg.dev/doc/repo-signing-key.gpg -o /etc/apt/trusted.gpg.d/artifact-registry.asc
@@ -66,7 +72,7 @@ jobs:
       - name: Standby test
         run: |
           (cd lps && nohup python3 -m http.server 8099 --bind 0.0.0.0 >/dev/null 2>&1 &)
-          export PATH="$ANDROID_HOME/platform-tools:$PATH" CCRD_ADB_CONNECT=127.0.0.1:6520 ANDROID_SERIAL=127.0.0.1:6520 LPS_DEX=$PWD/lps/classes.dex LPS_OVERLAY=$PWD/lps/overlay.apk
+          export PATH="$ANDROID_HOME/platform-tools:$PATH" CCRD_ADB_CONNECT=127.0.0.1:6520 ANDROID_SERIAL=127.0.0.1:6520 LPS_DEX=$PWD/lps/classes.dex LPS_OVERLAY=$PWD/lps/overlay.apk ALARM_APK=$PWD/lps/alarmprobe.apk
           bash tools/tv-standby-lab.sh tv-app/out/claudes-computer.apk standby-out
       - name: Summary
         if: always()
