@@ -3,7 +3,9 @@
 # isn't running. keepawake.sh runs this every 30 seconds while someone is watching.
 D=/opt/ccrd
 # One run at a time: a "desktop on" from the TV can arrive while keepawake.sh is running this. The second waits.
-exec 8>/tmp/desktop-on.lock; flock -w 300 8 || exit 1
+# One copy at a time. flock holds the lock and runs this script as its child without passing the lock on, so
+# the programs this starts (screen, desktop, stream) don't keep holding it after the script ends.
+[ -z "$DESKTOP_ON_LOCKED" ] && exec env DESKTOP_ON_LOCKED=1 flock -w 300 -o /tmp/desktop-on.lock "$0" "$@"
 # CCRD_NAME=Work desktop-on.sh: this session's computer is "Work" (ccrd-work on the tailnet; computer-name.sh).
 # Remembered in ccrd.conf; CCRD_NAME= (empty) makes it the first computer again.
 if [ -n "${CCRD_NAME+set}" ]; then
