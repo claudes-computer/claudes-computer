@@ -21,7 +21,7 @@ root(){ adb root >/dev/null 2>&1; sleep 4; conn; adb wait-for-device; }
 lps(){ sh dumpsys power | awk '/Low Power Standby Controller:/{p=1} p{print} p&&/mAllowedFeatures=/{exit}' | head -45; }
 v(){ lps | sed -n "s/^ *$1=//p" | head -1; }
 tool(){ sh "CLASSPATH=/data/local/tmp/lps.dex app_process / Lps $*" | tail -1; }
-uidof(){ sh dumpsys package "$1" | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1; }
+uidof(){ sh dumpsys package "$1" | sed -n -E 's/.*(userId|appId)=([0-9]+).*/\2/p' | head -1; }
 # Can this app's user id open a connection right now? (root runs the test as that uid)
 reach(){ sh "su $1 sh -c 'echo | toybox nc -w 5 $PROBE $PP >/dev/null 2>&1 && echo CONNECTS || echo BLOCKED'" | tail -1; }
 sleep_tv(){ sh input keyevent SLEEP; sleep "${1:-20}"; }
@@ -72,7 +72,7 @@ U=$(uidof $PKG); UH=$(uidof $H); say "our user ids: app=$U helper=$UH"
 open_app(){ wake_tv; sh am start -W -n $PKG/dev.ccrd.tv.MainActivity >/dev/null; sleep 10; }
 
 say "--- A. no exemption"
-say "policy: $(tool policy plain '' 0)"
+say "policy: $(tool policy plain - 0)"
 open_app;    say "screen on:   app $(reach $U)   helper $(reach $UH)"
 sleep_tv 20; say "screen off:  app $(reach $U)   helper $(reach $UH)   (standby active=$(v mIsActive), allowed uids=$(v 'Allowed UIDs'))"
 lps > "$OUT/lps-2-off-noexempt.txt"; sh dumpsys netpolicy > "$OUT/netpolicy-a.txt"
@@ -85,7 +85,7 @@ say "app while off: $(sh pidof $PKG >/dev/null && echo running || echo 'not runn
 lps > "$OUT/lps-3-off-exempt.txt"; sh dumpsys netpolicy > "$OUT/netpolicy-b.txt"
 
 say "--- C. no exempt list, cut-off switched off (the fallback)"
-wake_tv; tool policy plain '' 0 >/dev/null; sh settings put global low_power_standby_enabled 0; sleep 2
+wake_tv; tool policy plain - 0 >/dev/null; sh settings put global low_power_standby_enabled 0; sleep 2
 sleep_tv 20; say "screen off:  app $(reach $U)   (enabled=$(v mIsEnabled) active=$(v mIsActive))"
 wake_tv; sh settings put global low_power_standby_enabled 1
 
@@ -97,7 +97,7 @@ if [ -n "$ALARM_APK" ] && [ -n "$PROBE" ]; then
   say "--- D. no exemption; the app wakes itself with an alarm every 45 s"
   say "install alarm probe: $(T=300 adb install -r --no-streaming "$ALARM_APK" 2>&1 | tail -1)"
   for reasons in 7 1; do
-    wake_tv; tool policy "alarm_test_$reasons" '' $reasons >/dev/null; sh settings put global low_power_standby_enabled 1
+    wake_tv; tool policy "alarm_test_$reasons" - $reasons >/dev/null; sh settings put global low_power_standby_enabled 1
     adb logcat -c; sh am start -n dev.ccrd.alarmprobe/.Start --es host "$PROBE" --ei port "$PP" --ei every 45 >/dev/null; sleep 5
     sh input keyevent SLEEP; sleep 170
     adb logcat -d -s AlarmProbe:I | grep -o "AlarmProbe: .*" > "$OUT/alarm-reasons-$reasons.txt"

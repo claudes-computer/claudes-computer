@@ -1,6 +1,6 @@
 // A test tool for Android's Low Power Standby, run on the device as the shell user:
 //   CLASSPATH=/data/local/tmp/lps.dex app_process / Lps status | enable true|false | force true|false
-//                                                    | policy <identifier> <pkg,pkg,...> [allowedReasons]
+//                                                    | policy <identifier> <pkg,pkg,...|-> [allowedReasons]
 // It calls the power manager directly (the shell user holds MANAGE_LOW_POWER_STANDBY), which is what a TV's
 // Settings app does when an Energy mode is chosen. Used by tools/tv-standby-lab.sh on devices without TV Settings.
 import java.lang.reflect.Method;
@@ -20,7 +20,7 @@ public class Lps {
         else if (cmd.equals("policy")) {
             Object p = pol.getDeclaredConstructor().newInstance();
             pol.getField("identifier").set(p, a[1]);
-            pol.getField("exemptPackages").set(p, new ArrayList<String>(a[2].isEmpty() ? new ArrayList<String>() : Arrays.asList(a[2].split(","))));
+            pol.getField("exemptPackages").set(p, new ArrayList<String>(a[2].isEmpty() || a[2].equals("-") ? new ArrayList<String>() : Arrays.asList(a[2].split(","))));
             pol.getField("allowedReasons").setInt(p, a.length > 3 ? Integer.parseInt(a[3]) : 0);
             pol.getField("allowedFeatures").set(p, new ArrayList<String>());
             ipm.getMethod("setLowPowerStandbyPolicy", pol).invoke(pm, p);
