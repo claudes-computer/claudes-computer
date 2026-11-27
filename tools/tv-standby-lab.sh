@@ -1,7 +1,9 @@
 #!/bin/bash
 # Recreates what newer TVs do in standby, on an unlocked (userdebug) Android 14 virtual device, and checks our
 # answer to it.
-#   tools/tv-standby-lab.sh <claudes-computer.apk> [output dir]      (LPS_DEX=path to lps.dex, see tools/lab/Lps.java)
+#   tools/tv-standby-lab.sh <claudes-computer.apk> [output dir]
+# with LPS_DEX (tools/lab/Lps.java built to a dex), LPS_OVERLAY (tools/lab/lps-overlay built to an apk) and a
+# listener on the test host at PROBE_PORT (default 8099).
 # TV makers turn on Android's Low Power Standby: seconds after the screen goes off, apps that aren't on screen lose
 # the network. Stock images ship with it off, so this turns it on (a framework config overlay, as root), then:
 #   A. shows the cut-off happening to our app with no exemption,
@@ -21,7 +23,7 @@ v(){ lps | sed -n "s/^ *$1=//p" | head -1; }
 tool(){ sh "CLASSPATH=/data/local/tmp/lps.dex app_process / Lps $*" | tail -1; }
 uidof(){ sh dumpsys package "$1" | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1; }
 # Can this app's user id open a connection right now? (root runs the test as that uid)
-reach(){ sh "su $1 sh -c 'echo | toybox nc -w 5 $PROBE 80 >/dev/null 2>&1 && echo CONNECTS || echo BLOCKED'" | tail -1; }
+reach(){ sh "su $1 sh -c 'echo | toybox nc -w 5 $PROBE $PP >/dev/null 2>&1 && echo CONNECTS || echo BLOCKED'" | tail -1; }
 sleep_tv(){ sh input keyevent SLEEP; sleep "${1:-20}"; }
 wake_tv(){ sh input keyevent WAKEUP; sleep 4; sh input keyevent 82 >/dev/null; sleep 2; }
 
@@ -32,20 +34,36 @@ sh settings put global verifier_verify_adb_installs 0 >/dev/null; sh settings pu
 unzip -p "$APK" assets/helper.apk > "$OUT/helper.apk" 2>/dev/null
 say "install: $(T=300 adb install -r --no-streaming "$APK" 2>&1 | tail -1) / helper: $(T=300 adb install -r --no-streaming "$OUT/helper.apk" 2>&1 | tail -1)"; rm -f "$OUT/helper.apk"
 [ -n "$LPS_DEX" ] && adb push "$LPS_DEX" /data/local/tmp/lps.dex >/dev/null 2>&1
-PROBE=$(sh "ping -c1 -W3 connectivitycheck.gstatic.com 2>/dev/null | sed -n 's/^PING [^(]*(\([0-9.]*\)).*/\1/p'"); PROBE=${PROBE:-142.250.80.99}
-say "network probe target: $PROBE (as root: $(sh "echo | toybox nc -w 5 $PROBE 80 >/dev/null 2>&1 && echo CONNECTS || echo BLOCKED"))"
+# The probe target is a listener on the test host (PROBE_PORT, started by whoever runs this), reached at the
+# device's own gateway: no internet needed.
+PP=${PROBE_PORT:-8099}; PROBE=""
+for g in $(sh "ip route show table all 2>/dev/null | sed -n 's/.*default via \([0-9.]*\).*/\1/p' | sort -u") 192.168.97.1 192.168.96.1 10.0.2.2; do
+  [ "$(sh "echo | toybox nc -w 4 $g $PP >/dev/null 2>&1 && echo ok")" = ok ] && { PROBE=$g; break; }
+done
+say "network probe target: ${PROBE:-NONE FOUND} port $PP"
+[ -n "$PROBE" ] || say "(no reachable probe target: the CONNECTS/BLOCKED lines below can't be trusted; see the allowed-uids values)"
 say "before: supported=$(v mSupportedConfig) enabled=$(v mIsEnabled)   TV Settings present: $(sh pm list packages | grep -c com.android.tv.settings)"
 
 say "--- turning Low Power Standby on, the way a TV maker's build has it"
-sh cmd overlay fabricate --target android --name CcrdLps android:bool/config_lowPowerStandbySupported 0x12 0xffffffff
-sh cmd overlay fabricate --target android --name CcrdLpsOn android:bool/config_lowPowerStandbyEnabledByDefault 0x12 0xffffffff
-sh cmd overlay enable --user 0 com.android.shell:CcrdLps; sh cmd overlay enable --user 0 com.android.shell:CcrdLpsOn
-say "overlays: $(sh cmd overlay list android | grep -i ccrd | tr '\n' ' ')"
+# A built-in (immutable) overlay in /product/overlay: the power service reads this config during start-up, before
+# overlays enabled at run time reach it (a first version that used "cmd overlay fabricate" showed exactly that).
+remount(){ root; adb remount 2>&1 | tail -2; }
+R=$(remount); say "remount: $(echo "$R" | tr '\n' ' ')"
+if echo "$R" | grep -qi "reboot"; then adb reboot; sleep 15; booted; sleep 10; say "remount again: $(remount | tr '\n' ' ')"; fi
+sh mkdir -p /product/overlay/config
+adb push "$LPS_OVERLAY" /product/overlay/CcrdLps.apk >/dev/null 2>&1; sh chmod 644 /product/overlay/CcrdLps.apk
+cfg=$(sh cat /product/overlay/config/config.xml 2>/dev/null | grep -v "No such file")
+line='    <overlay package="dev.ccrd.lpsoverlay" mutable="false" enabled="true" />'
+if echo "$cfg" | grep -q "</config>"; then echo "$cfg" | sed "s#</config>#$line\n</config>#" > "$OUT/overlay-config.xml"
+else printf '<?xml version="1.0" encoding="utf-8"?>\n<config>\n%s\n</config>\n' "$line" > "$OUT/overlay-config.xml"; fi
+adb push "$OUT/overlay-config.xml" /product/overlay/config/config.xml >/dev/null 2>&1; sh chmod 644 /product/overlay/config/config.xml
+say "overlay installed: $(sh ls -la /product/overlay/CcrdLps.apk | awk '{print $5, $NF}')"
 sh device_config set_sync_disabled_for_tests persistent >/dev/null
 sh device_config put low_power_standby enable_policy true
 sh settings put global low_power_standby_enabled 1
-adb shell 'stop; sleep 3; start'; sleep 25; booted; sleep 25; root; wake_tv
-say "after framework restart: supported=$(v mSupportedConfig) enabled=$(v mIsEnabled) custom-policy=$(v mEnableCustomPolicy) timeout-ms=$(v mStandbyTimeoutConfig)"
+adb reboot; sleep 15; booted; sleep 25; root; wake_tv
+say "overlay state: $(sh cmd overlay list android | grep -i ccrd | tr '\n' ' ')"
+say "after restart: supported=$(v mSupportedConfig) enabled=$(v mIsEnabled) custom-policy=$(v mEnableCustomPolicy) timeout-ms=$(v mStandbyTimeoutConfig)"
 lps > "$OUT/lps-1-on.txt"
 [ "$(v mSupportedConfig)" = true ] || { say "couldn't turn it on here (the overlay didn't take). Stopping."; cat "$OUT/lps-1-on.txt" >> "$OUT/summary.txt"; exit 0; }
 [ "$(v mIsEnabled)" = true ] || say "enable via the power manager: $(tool enable true)"

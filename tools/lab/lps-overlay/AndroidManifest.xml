@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A framework config overlay that switches Low Power Standby on, the way a TV maker's build does. Installed into
+     /product/overlay on a rooted test device by tools/tv-standby-lab.sh. It has to be a built-in (immutable) overlay:
+     the power service reads this setting during start-up, before overlays enabled at run time reach it. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.ccrd.lpsoverlay">
+    <application android:hasCode="false"/>
+    <overlay android:targetPackage="android" android:isStatic="true" android:priority="999"/>
+</manifest>

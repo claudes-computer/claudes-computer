@@ -32,6 +32,11 @@ jobs:
           ABIS=android/arm,android/386,android/amd64 bash tv-app/build.sh 2>&1 | tail -2
           J=$(find tv-app/build/sdk/platforms -name android.jar | head -1); D8=$(find tv-app/build/build-tools -name d8 | head -1)
           mkdir -p lps && javac -source 8 -target 8 -nowarn -cp "$J" -d lps tools/lab/Lps.java && "$D8" --output lps lps/Lps.class && ls -la lps/classes.dex
+          BT=tv-app/build/build-tools
+          $BT/aapt2 compile --dir tools/lab/lps-overlay/res -o lps/res.zip
+          $BT/aapt2 link -I "$J" --manifest tools/lab/lps-overlay/AndroidManifest.xml -o lps/u.apk lps/res.zip --min-sdk-version 33 --target-sdk-version 34
+          keytool -genkeypair -keystore lps/k.jks -storepass android -alias a -keyalg RSA -validity 9999 -dname CN=lab >/dev/null 2>&1
+          $BT/zipalign -f 4 lps/u.apk lps/a.apk && $BT/apksigner sign --ks lps/k.jks --ks-pass pass:android --out lps/overlay.apk lps/a.apk && ls -la lps/overlay.apk
       - name: Cuttlefish host tools
         run: |
           sudo curl -fsSL https://us-apt.pkg.dev/doc/repo-signing-key.gpg -o /etc/apt/trusted.gpg.d/artifact-registry.asc
@@ -60,7 +65,8 @@ jobs:
           adb devices
       - name: Standby test
         run: |
-          export PATH="$ANDROID_HOME/platform-tools:$PATH" CCRD_ADB_CONNECT=127.0.0.1:6520 ANDROID_SERIAL=127.0.0.1:6520 LPS_DEX=$PWD/lps/classes.dex
+          (cd lps && nohup python3 -m http.server 8099 --bind 0.0.0.0 >/dev/null 2>&1 &)
+          export PATH="$ANDROID_HOME/platform-tools:$PATH" CCRD_ADB_CONNECT=127.0.0.1:6520 ANDROID_SERIAL=127.0.0.1:6520 LPS_DEX=$PWD/lps/classes.dex LPS_OVERLAY=$PWD/lps/overlay.apk
           bash tools/tv-standby-lab.sh tv-app/out/claudes-computer.apk standby-out
       - name: Summary
         if: always()
