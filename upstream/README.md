@@ -11,6 +11,8 @@ Small patches that came out of this project and belong in the projects they chan
   `feature/controlwebsocket`, that a program imports to switch it on. Without the import nothing changes.
   It comes with tests (fallback used, fallback not needed, both refused).
 
-The build this project actually runs (`cloud/tailscale-control-websocket.patch`, against v1.106.0) is an earlier
-form of the same idea plus two conveniences: the relay WebSocket fallback linked into tailscaled, and the
-`TS_CONTROL_WEBSOCKET=1` / `TS_DERP_WEBSOCKET=1` switches that try WebSocket first.
+Not submitted: [tailscale/tailscale#22643](https://github.com/tailscale/tailscale/pull/22643), opened two days
+earlier by someone else, is the same design and is the better version of it (it keeps the handshake out of the
+connection's address and refuses redirects). The build this project runs (`cloud/tailscale-control-websocket.patch`)
+uses #22643 unchanged, plus the relay fallback linked into tailscaled and the `TS_CONTROL_WEBSOCKET=1` /
+`TS_DERP_WEBSOCKET=1` switches that go straight to WebSocket.

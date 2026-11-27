@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds tailscaled with our patches: relay speed (bigger relay send queue, packets bundled per write) and the
-# WebSocket fallback for machines behind a proxy that intercepts TLS (tailscale-control-websocket.patch).
+# WebSocket fallbacks for machines behind a proxy that intercepts TLS (tailscale-control-websocket.patch; the control
+# half is tailscale/tailscale#22643).
 # Stock Tailscale drops relay packets past a 32-packet queue and flushes every packet on its own,
 # which held the cloud-to-home stream at ~8 Mbit/s; patched it measured 23-34 Mbit/s.
 set -e

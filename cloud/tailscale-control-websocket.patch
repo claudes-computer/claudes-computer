@@ -1,17 +1,13 @@
-For machines behind an HTTP proxy that intercepts TLS and refuses Tailscale's protocol upgrades but allows
-WebSockets (seen in another AI agent's sandbox: CONNECT works, then 403 on POST /ts2021). Tailscale 1.106+.
-- Control: after the normal dial fails with "unexpected HTTP response", connect over WebSocket, as the browser
-  (js/wasm) client always does. TS_CONTROL_WEBSOCKET=1 tries it first. Noise still runs inside.
-- DERP: links in Tailscale's own opt-in feature/derpwebsocket, which falls back to WebSockets the same way;
-  TS_DERP_WEBSOCKET=1 skips the DERP upgrade attempt and uses WebSockets from the start.
-Tested 2026-11-26: signed in and reached a home computer with both control and DERP over WebSocket (forced),
-64 ms ping via DERP; ~5 Mbit/s vs ~21 Mbit/s on the normal DERP upgrade through the same proxy.
-Apply: cd tailscale-src && patch -p1 < tailscale-control-websocket.patch; run tailscaled with HTTPS_PROXY set.
-
-diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/cmd/tailscaled/derpwebsocket.go ts-ws/cmd/tailscaled/derpwebsocket.go
---- a/cmd/tailscaled/derpwebsocket.go	1969-12-31 16:00:00.000000000 -0800
-+++ b/cmd/tailscaled/derpwebsocket.go	2026-11-26 13:35:08.228037710 -0800
-@@ -0,0 +1,9 @@
+# Tailscale with the WebSocket fallbacks, for machines behind a proxy that intercepts TLS and refuses Tailscale's own
+# upgrades but passes WebSockets (some AI agents' sandboxes). Applied by build-tailscaled.sh after the relay patch.
+# - Control: tailscale/tailscale#22643 (NightFeather0615) as it stands, unchanged: hook in control/controlhttp and
+#   the opt-in feature/controlwebsocket package. Plus one local line: TS_CONTROL_WEBSOCKET=1 goes straight to
+#   WebSocket, skipping the request that's certain to be refused.
+# - Relay: Tailscale's own feature/derpwebsocket, linked in, plus TS_DERP_WEBSOCKET=1 (WebSocket first).
+diff -ruN -x state -x 'tailscale*-ws' a/cmd/tailscaled/websockets.go b/cmd/tailscaled/websockets.go
+--- a/cmd/tailscaled/websockets.go	1969-12-31 16:00:00.000000000 -0800
++++ b/cmd/tailscaled/websockets.go	2026-11-26 20:29:03.604302564 -0800
+@@ -0,0 +1,13 @@
 +// Copyright (c) Tailscale Inc & contributors
 +// SPDX-License-Identifier: BSD-3-Clause
 +
@@ -19,121 +15,142 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/cmd/tailscaled/derpwebsocket.go
 +
 +package main
 +
-+// DERP inside WebSockets when a TLS-intercepting proxy refuses DERP's own upgrade (see feature/derpwebsocket).
-+import _ "tailscale.com/feature/derpwebsocket"
-diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client.go ts-ws/control/controlhttp/client.go
++// Control and DERP inside WebSockets when a TLS-intercepting proxy refuses their own upgrades
++// (see feature/controlwebsocket and feature/derpwebsocket).
++import (
++	_ "tailscale.com/feature/controlwebsocket"
++	_ "tailscale.com/feature/derpwebsocket"
++)
+diff -ruN -x state -x 'tailscale*-ws' a/control/controlhttp/client.go b/control/controlhttp/client.go
 --- a/control/controlhttp/client.go	2026-11-26 13:35:07.833965874 -0800
-+++ b/control/controlhttp/client.go	2026-11-26 13:35:08.224136548 -0800
-@@ -68,7 +68,19 @@
- 	if a.Hostname == "" {
- 		return nil, errors.New("required Dialer.Hostname empty")
++++ b/control/controlhttp/client.go	2026-11-26 20:29:03.600344039 -0800
+@@ -348,7 +348,27 @@
+ 	if err != nil {
+ 		return nil, err
  	}
--	return a.dial(ctx)
-+	if controlWebsocketFirst() {
-+		return a.dialWebsocket(ctx)
+-	netConn, err := a.tryURLUpgrade(ctx, u, optAddr, optACEHost, init)
++	var netConn net.Conn
++	if upgradeWebsocket, ok := HookUpgradeWebsocket.GetOk(); ok && controlWebsocketFirst() {
++		// Known to be behind a proxy that refuses the control upgrade: skip
++		// the request that's certain to fail.
++		netConn, err = a.tryURLUpgrade(ctx, u, optAddr, optACEHost, init, upgradeWebsocket)
++	} else {
++		netConn, err = a.tryURLUpgrade(ctx, u, optAddr, optACEHost, init, nil)
 +	}
-+	c, err := a.dial(ctx)
-+	if wantsWebsocketFallback(err) {
-+		a.logf("controlhttp: protocol upgrade refused (%v); trying WebSocket", err)
-+		if wc, werr := a.dialWebsocket(ctx); werr == nil {
-+			return wc, nil
-+		} else {
-+			a.logf("controlhttp: WebSocket failed too: %v", werr)
++	if upgradeWebsocket, ok := HookUpgradeWebsocket.GetOk(); ok && !controlWebsocketFirst() && errors.As(err, new(upgradeError)) {
++		a.logf("controlhttp: HTTP upgrade to %v failed, retrying with WebSocket: %v", u, err)
++		// Start over with a new handshake rather than reuse the one the
++		// failed request carried.
++		init, cont, err = controlbase.ClientDeferred(a.MachineKey, a.ControlKey, a.ProtocolVersion)
++		if err != nil {
++			return nil, err
++		}
++		netConn, err = a.tryURLUpgrade(ctx, u, optAddr, optACEHost, init, upgradeWebsocket)
++		if err != nil {
++			return nil, fmt.Errorf("WebSocket upgrade: %w", err)
 +		}
 +	}
-+	return c, err
- }
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -396,13 +416,49 @@
  
- func (a *Dialer) logf(format string, args ...any) {
-diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/control/controlhttp/client_ws.go ts-ws/control/controlhttp/client_ws.go
---- a/control/controlhttp/client_ws.go	1969-12-31 16:00:00.000000000 -0800
-+++ b/control/controlhttp/client_ws.go	2026-11-26 16:23:04.176952804 -0800
-@@ -0,0 +1,82 @@
-+// Copyright (c) Tailscale Inc & contributors
-+// SPDX-License-Identifier: BSD-3-Clause
-+
-+//go:build !js
-+
-+package controlhttp
-+
-+// A WebSocket fallback for the control connection, for machines behind an HTTP proxy that intercepts TLS and
-+// refuses Tailscale's own protocol upgrade (POST /ts2021, "Upgrade: tailscale-control-protocol") but allows
-+// WebSockets, as in some sandboxes for AI agents. It is the transport the js/wasm client always uses
-+// (client_js.go), and control servers already accept it. The Noise protocol runs inside, so an intercepting
-+// proxy still can't read or change the conversation.
+ var HookMakeACEDialer feature.Hook[func(dialer netx.DialFunc, aceHost string, optIP netip.Addr) netx.DialFunc]
+ 
++// HookUpgradeWebsocket, if set, is how control clients get past HTTP proxies
++// that refuse the "Upgrade: tailscale-control-protocol" request but allow
++// WebSocket upgrades, like browsers use. Cloudflare's proxy is one. It's set
++// by the opt-in feature/controlwebsocket package.
 +//
-+// It's tried after the normal dial fails, or first with TS_CONTROL_WEBSOCKET=1.
++// If the HTTP upgrade to the control protocol gets an HTTP response other
++// than the switch to that protocol, the dialer starts a new Noise handshake
++// and calls the hook to send it to the same URL in a WebSocket handshake,
++// using the same DNS, proxy and TLS settings.
++var HookUpgradeWebsocket feature.Hook[WebsocketUpgrader]
 +
-+import (
-+	"context"
-+	"crypto/tls"
-+	"encoding/base64"
-+	"net"
-+	"net/http"
-+	"net/url"
-+	"strings"
-+
-+	"github.com/coder/websocket"
-+	"tailscale.com/control/controlbase"
-+	"tailscale.com/control/controlhttp/controlhttpcommon"
-+	"tailscale.com/envknob"
-+	"tailscale.com/net/wsconn"
-+)
-+
++// controlWebsocketFirst makes the dialer use HookUpgradeWebsocket straight
++// away, for machines known to sit behind a proxy that refuses the control
++// upgrade (local addition to the upstream change, not part of it).
 +var controlWebsocketFirst = envknob.RegisterBool("TS_CONTROL_WEBSOCKET")
 +
-+// wantsWebsocketFallback reports whether err looks like a proxy refusing the protocol upgrade.
-+func wantsWebsocketFallback(err error) bool {
-+	return err != nil && strings.Contains(err.Error(), "unexpected HTTP response")
-+}
++// WebsocketUpgrader is the type of [HookUpgradeWebsocket].
++//
++// It does a WebSocket handshake with the "tailscale-control-protocol"
++// subprotocol for urlStr, such as
++// "https://ctrl.example.com/ts2021?X-Tailscale-Handshake=...", sending its
++// request with hc. The ctx bounds the handshake. It returns a net.Conn that
++// carries the control protocol in binary WebSocket messages.
++type WebsocketUpgrader func(ctx context.Context, hc *http.Client, urlStr string) (net.Conn, error)
 +
-+func (a *Dialer) dialWebsocket(ctx context.Context) (*ClientConn, error) {
-+	init, cont, err := controlbase.ClientDeferred(a.MachineKey, a.ControlKey, a.ProtocolVersion)
-+	if err != nil {
-+		return nil, err
-+	}
-+	host := a.Hostname
-+	if a.HTTPSPort != "" && a.HTTPSPort != "443" && a.HTTPSPort != NoPort {
-+		host = net.JoinHostPort(host, a.HTTPSPort)
-+	}
-+	u := &url.URL{
-+		Scheme: "wss",
-+		Host:   host,
-+		Path:   serverUpgradePath,
-+		RawQuery: url.Values{
++// upgradeError is an error from an HTTP upgrade exchange in which the server
++// or a proxy answered but didn't switch to the control protocol.
++// See HookUpgradeWebsocket.
++type upgradeError struct{ err error }
++
++func (e upgradeError) Error() string { return e.err.Error() }
++func (e upgradeError) Unwrap() error { return e.err }
++
+ // tryURLUpgrade connects to u, and tries to upgrade it to a net.Conn.
+ //
+ // If optAddr is valid, then no DNS is used and the connection will be made to
+ // the provided address.
+ //
++// If upgradeWebsocket is non-nil, it's used in place of the HTTP upgrade to
++// the control protocol. See HookUpgradeWebsocket.
++//
+ // Only the provided ctx is used, not a.ctx.
+-func (a *Dialer) tryURLUpgrade(ctx context.Context, u *url.URL, optAddr netip.Addr, optACEHost string, init []byte) (_ net.Conn, retErr error) {
++func (a *Dialer) tryURLUpgrade(ctx context.Context, u *url.URL, optAddr netip.Addr, optACEHost string, init []byte, upgradeWebsocket WebsocketUpgrader) (_ net.Conn, retErr error) {
+ 	var dns *dnscache.Resolver
+ 
+ 	// If we were provided an address to dial, then create a resolver that just
+@@ -504,6 +560,24 @@
+ 	tr.DialTLSContext = dnscache.TLSDialer(dialer, dns, tr.TLSClientConfig)
+ 	tr.DisableCompression = true
+ 
++	if upgradeWebsocket != nil {
++		wsURL := *u
++		// For WebSockets, the server takes the Noise handshake from the
++		// query, since browsers (and so the js/wasm client) can't set
++		// headers on them.
++		wsURL.RawQuery = url.Values{
 +			controlhttpcommon.HandshakeHeaderName: []string{base64.StdEncoding.EncodeToString(init)},
-+		}.Encode(),
++		}.Encode()
++		hc := &http.Client{
++			Transport: tr,
++			// Like the HTTP upgrade, stick to the URL we were given.
++			CheckRedirect: func(*http.Request, []*http.Request) error {
++				return http.ErrUseLastResponse
++			},
++		}
++		return upgradeWebsocket(ctx, hc, wsURL.String())
 +	}
-+	proxy := a.getProxyFunc()
-+	if proxy == nil {
-+		proxy = http.ProxyFromEnvironment
-+	}
-+	// WebSockets need HTTP/1.1. A proxy that intercepts TLS may offer HTTP/2 even where the real server doesn't,
-+	// and the handshake then hangs: offer only HTTP/1.1, and leave Go's HTTP/2 off for this one transport.
-+	hc := &http.Client{Transport: &http.Transport{
-+		Proxy:           proxy,
-+		TLSClientConfig: &tls.Config{NextProtos: []string{"http/1.1"}},
-+		TLSNextProto:    map[string]func(string, *tls.Conn) http.RoundTripper{},
-+	}}
-+	ws, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{
-+		Subprotocols: []string{controlhttpcommon.UpgradeHeaderValue},
-+		HTTPClient:   hc,
-+	})
-+	if err != nil {
-+		return nil, err
-+	}
-+	nc := wsconn.NetConn(context.Background(), ws, websocket.MessageBinary, u.String())
-+	cc, err := cont(ctx, nc)
-+	if err != nil {
-+		nc.Close()
-+		return nil, err
-+	}
-+	a.logf("controlhttp: connected over WebSocket")
-+	return &ClientConn{Conn: cc}, nil
-+}
-diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/derp/derphttp/derphttp_client.go ts-ws/derp/derphttp/derphttp_client.go
++
+ 	// (mis)use httptrace to extract the underlying net.Conn from the
+ 	// transport. The transport handles 101 Switching Protocols correctly,
+ 	// such that the Conn will not be reused or kept alive by the transport
+@@ -553,7 +627,8 @@
+ 	}
+ 
+ 	if resp.StatusCode != http.StatusSwitchingProtocols {
+-		return nil, fmt.Errorf("unexpected HTTP response: %s", resp.Status)
++		resp.Body.Close()
++		return nil, upgradeError{fmt.Errorf("unexpected HTTP response: %s", resp.Status)}
+ 	}
+ 
+ 	// From here on, the underlying net.Conn is ours to use, but there
+@@ -568,7 +643,7 @@
+ 
+ 	if next := resp.Header.Get("Upgrade"); next != controlhttpcommon.UpgradeHeaderValue {
+ 		resp.Body.Close()
+-		return nil, fmt.Errorf("server switched to unexpected protocol %q", next)
++		return nil, upgradeError{fmt.Errorf("server switched to unexpected protocol %q", next)}
+ 	}
+ 
+ 	rwc, ok := resp.Body.(io.ReadWriteCloser)
+diff -ruN -x state -x 'tailscale*-ws' a/derp/derphttp/derphttp_client.go b/derp/derphttp/derphttp_client.go
 --- a/derp/derphttp/derphttp_client.go	2026-11-26 13:35:07.834686997 -0800
-+++ b/derp/derphttp/derphttp_client.go	2026-11-26 13:57:01.015776486 -0800
++++ b/derp/derphttp/derphttp_client.go	2026-11-26 20:29:03.621964179 -0800
 @@ -364,6 +364,10 @@
  	return false
  }
@@ -166,3 +183,310 @@ diff -ruN -x 'tailscale*-ws' -x state ts-ws.orig/derp/derphttp/derphttp_client.g
  	return client, connGen, err
  }
  
+diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/controlwebsocket.go b/feature/controlwebsocket/controlwebsocket.go
+--- a/feature/controlwebsocket/controlwebsocket.go	1969-12-31 16:00:00.000000000 -0800
++++ b/feature/controlwebsocket/controlwebsocket.go	2026-11-26 20:28:53.198358061 -0800
+@@ -0,0 +1,16 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++// Package controlwebsocket registers a fallback for control clients to speak
++// the Noise control protocol inside WebSockets, as browsers do, when their
++// HTTP upgrade to it fails. This gets through HTTP proxies that pass
++// WebSocket upgrades but no others, such as Cloudflare's, so a control server
++// like Headscale can sit behind one.
++//
++// It's the control plane's counterpart to feature/derpwebsocket. Neither
++// tailscaled nor tsnet links it in. Programs that want it must import it
++// themselves.
++//
++// On js/wasm, where control clients always use WebSockets, importing it does
++// nothing.
++package controlwebsocket
+diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/controlwebsocket_test.go b/feature/controlwebsocket/controlwebsocket_test.go
+--- a/feature/controlwebsocket/controlwebsocket_test.go	1969-12-31 16:00:00.000000000 -0800
++++ b/feature/controlwebsocket/controlwebsocket_test.go	2026-11-26 20:28:53.198392308 -0800
+@@ -0,0 +1,230 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++//go:build !js
++
++package controlwebsocket
++
++import (
++	"context"
++	"io"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"tailscale.com/control/controlbase"
++	"tailscale.com/control/controlhttp"
++	"tailscale.com/control/controlhttp/controlhttpcommon"
++	"tailscale.com/control/controlhttp/controlhttpserver"
++	"tailscale.com/tailcfg"
++	"tailscale.com/types/key"
++)
++
++// testServer is a control server that counts its upgrade requests and can
++// refuse the control protocol upgrade like Cloudflare's proxy does.
++type testServer struct {
++	srv           *httptest.Server
++	serverKey     key.MachinePrivate
++	blockControl  atomic.Bool  // whether to refuse "Upgrade: tailscale-control-protocol"
++	blockWS       atomic.Bool  // whether to refuse "Upgrade: websocket"
++	ctrlUpgrades  atomic.Int32 // control protocol upgrade requests, refused or not
++	wsUpgrades    atomic.Int32 // WebSocket upgrade requests, refused or not
++	acceptedConns chan *controlbase.Conn
++}
++
++func newTestServer(t *testing.T, tlsServer, blockControl bool) *testServer {
++	ts := &testServer{
++		serverKey:     key.NewMachine(),
++		acceptedConns: make(chan *controlbase.Conn, 4),
++	}
++	ts.blockControl.Store(blockControl)
++	ts.srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		switch strings.ToLower(r.Header.Get("Upgrade")) {
++		case controlhttpcommon.UpgradeHeaderValue:
++			ts.ctrlUpgrades.Add(1)
++			if ts.blockControl.Load() {
++				http.Error(w, "upgrade blocked", http.StatusForbidden)
++				return
++			}
++		case "websocket":
++			ts.wsUpgrades.Add(1)
++			if ts.blockWS.Load() {
++				http.Error(w, "WebSocket upgrade blocked", http.StatusForbidden)
++				return
++			}
++		}
++		conn, err := controlhttpserver.AcceptHTTP(context.Background(), w, r, ts.serverKey, nil)
++		if err != nil {
++			t.Logf("AcceptHTTP: %v", err)
++			return
++		}
++		ts.acceptedConns <- conn
++	}))
++	if tlsServer {
++		ts.srv.StartTLS()
++	} else {
++		ts.srv.Start()
++	}
++	t.Cleanup(ts.srv.Close)
++	return ts
++}
++
++func (ts *testServer) port() string {
++	return portOf(ts.srv.Listener.Addr())
++}
++
++func portOf(a net.Addr) string {
++	_, port, _ := net.SplitHostPort(a.String())
++	return port
++}
++
++// closedPort returns a local port that nothing listens on.
++func closedPort(t *testing.T) string {
++	ln, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer ln.Close()
++	return portOf(ln.Addr())
++}
++
++func (ts *testServer) checkUpgrades(t *testing.T, wantCtrl, wantWS int32) {
++	t.Helper()
++	if got := ts.ctrlUpgrades.Load(); got != wantCtrl {
++		t.Errorf("got %d control protocol upgrade requests; want %d", got, wantCtrl)
++	}
++	if got := ts.wsUpgrades.Load(); got != wantWS {
++		t.Errorf("got %d WebSocket upgrade requests; want %d", got, wantWS)
++	}
++}
++
++func newDialer(t *testing.T, ts *testServer, httpPort, httpsPort string) *controlhttp.Dialer {
++	d := &controlhttp.Dialer{
++		Hostname:        "127.0.0.1",
++		HTTPPort:        httpPort,
++		HTTPSPort:       httpsPort,
++		MachineKey:      key.NewMachine(),
++		ControlKey:      ts.serverKey.Public(),
++		ProtocolVersion: uint16(tailcfg.CurrentCapabilityVersion),
++		Logf:            t.Logf,
++	}
++	if ts.srv.TLS != nil {
++		d.ExtraRootCAs = ts.srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
++	}
++	return d
++}
++
++// dial dials with d and checks that bytes get through the resulting
++// connection to the server.
++func dial(t *testing.T, ts *testServer, d *controlhttp.Dialer) {
++	t.Helper()
++	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
++	defer cancel()
++	c, err := d.Dial(ctx)
++	if err != nil {
++		t.Fatalf("Dial: %v", err)
++	}
++	var sc *controlbase.Conn
++	select {
++	case sc = <-ts.acceptedConns:
++	case <-ctx.Done():
++		c.Close()
++		t.Fatal("server never accepted a connection")
++	}
++	// Close both ends at once: a WebSocket close waits for the peer's
++	// close frame, which a peer that isn't reading never sends.
++	defer func() {
++		done := make(chan struct{})
++		go func() {
++			sc.Close()
++			close(done)
++		}()
++		c.Close()
++		<-done
++	}()
++
++	msg := []byte("hello through the proxy")
++	if _, err := c.Write(msg); err != nil {
++		t.Fatalf("client Write: %v", err)
++	}
++	got := make([]byte, len(msg))
++	if _, err := io.ReadFull(sc, got); err != nil {
++		t.Fatalf("server Read: %v", err)
++	}
++	if string(got) != string(msg) {
++		t.Fatalf("server got %q; want %q", got, msg)
++	}
++}
++
++func TestFallback(t *testing.T) {
++	for _, tlsServer := range []bool{false, true} {
++		name := "http"
++		if tlsServer {
++			name = "https"
++		}
++		t.Run(name, func(t *testing.T) {
++			ts := newTestServer(t, tlsServer, true)
++			var d *controlhttp.Dialer
++			if tlsServer {
++				// Nothing listens on the HTTP port, so the dialer moves on
++				// to HTTPS.
++				d = newDialer(t, ts, closedPort(t), ts.port())
++			} else {
++				d = newDialer(t, ts, ts.port(), controlhttp.NoPort)
++			}
++			dial(t, ts, d)
++			ts.checkUpgrades(t, 1, 1)
++		})
++	}
++}
++
++// TestFallbackAfterRedirect checks the setup of Cloudflare with "Always Use
++// HTTPS": port 80 redirects every request to HTTPS, where only WebSocket
++// upgrades get through.
++func TestFallbackAfterRedirect(t *testing.T) {
++	ts := newTestServer(t, true, true)
++	var redirects atomic.Int32
++	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		redirects.Add(1)
++		u := *r.URL
++		u.Scheme = "https"
++		u.Host = ts.srv.Listener.Addr().String()
++		http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
++	}))
++	t.Cleanup(redirector.Close)
++
++	d := newDialer(t, ts, portOf(redirector.Listener.Addr()), ts.port())
++	dial(t, ts, d)
++	if redirects.Load() == 0 {
++		t.Error("dialer never tried the HTTP port")
++	}
++	// The redirects aren't followed, or the server would see more
++	// requests: the dialer moves on to its HTTPS port by itself.
++	ts.checkUpgrades(t, 1, 1)
++}
++
++func TestNoFallbackNeeded(t *testing.T) {
++	ts := newTestServer(t, false, false)
++	dial(t, ts, newDialer(t, ts, ts.port(), controlhttp.NoPort))
++	ts.checkUpgrades(t, 1, 0)
++}
++
++func TestFallbackFails(t *testing.T) {
++	ts := newTestServer(t, true, true)
++	ts.blockWS.Store(true)
++	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
++	defer cancel()
++	c, err := newDialer(t, ts, closedPort(t), ts.port()).Dial(ctx)
++	if err == nil {
++		c.Close()
++		t.Fatal("Dial succeeded with both upgrades blocked")
++	}
++	if !strings.Contains(err.Error(), "WebSocket") {
++		t.Errorf("Dial error %q doesn't mention the WebSocket attempt", err)
++	}
++	ts.checkUpgrades(t, 1, 1)
++}
+diff -ruN -x state -x 'tailscale*-ws' a/feature/controlwebsocket/upgrade_notjs.go b/feature/controlwebsocket/upgrade_notjs.go
+--- a/feature/controlwebsocket/upgrade_notjs.go	1969-12-31 16:00:00.000000000 -0800
++++ b/feature/controlwebsocket/upgrade_notjs.go	2026-11-26 20:28:53.198507101 -0800
+@@ -0,0 +1,49 @@
++// Copyright (c) Tailscale Inc & contributors
++// SPDX-License-Identifier: BSD-3-Clause
++
++//go:build !js
++
++package controlwebsocket
++
++import (
++	"context"
++	"net"
++	"net/http"
++	"net/url"
++
++	"github.com/coder/websocket"
++	"tailscale.com/control/controlhttp"
++	"tailscale.com/control/controlhttp/controlhttpcommon"
++	"tailscale.com/feature"
++	"tailscale.com/net/wsconn"
++)
++
++func init() {
++	if !feature.Register("controlwebsocket") {
++		return
++	}
++	controlhttp.HookUpgradeWebsocket.Set(upgrade)
++}
++
++// upgrade does a WebSocket handshake with the control server at urlStr
++// using hc, which controlhttp set up with its DNS, proxy and TLS settings.
++// It returns a net.Conn that carries the control protocol in binary
++// WebSocket messages.
++func upgrade(ctx context.Context, hc *http.Client, urlStr string) (net.Conn, error) {
++	wc, _, err := websocket.Dial(ctx, urlStr, &websocket.DialOptions{
++		HTTPClient:   hc,
++		Subprotocols: []string{controlhttpcommon.UpgradeHeaderValue},
++		// Noise messages don't compress.
++		CompressionMode: websocket.CompressionDisabled,
++	})
++	if err != nil {
++		return nil, err
++	}
++	// Leave the handshake in the query out of the conn's remote address.
++	remoteAddr := urlStr
++	if u, err := url.Parse(urlStr); err == nil {
++		remoteAddr = u.Host
++	}
++	// The conn outlives the handshake, so don't bind it to ctx.
++	return wsconn.NetConn(context.Background(), wc, websocket.MessageBinary, remoteAddr), nil
++}
