@@ -1,16 +1,23 @@
-# Recreates a newer TV's standby on an Android TV 14 emulator (Low Power Standby switched on, as TV makers ship it)
-# and checks that our exemption keeps the app on the network (tools/tv-standby-lab.sh). The result is in the run's
-# summary; the raw dumps are its artifacts. Runs when the script changes, and by hand.
+# Recreates a newer TV's standby on an unlocked Android 14 virtual device and checks that an exempted app keeps the
+# network while everything else is cut off (tools/tv-standby-lab.sh).
+# The device is Cuttlefish, Google's virtual Android, from a userdebug build published by Android's own build servers
+# (root included, which the SDK's TV emulator images don't have). Google publishes phone builds, not TV ones; the
+# standby cut-off is framework code and the same on both.
 name: TV standby lab
 on:
-  workflow_dispatch:   # by hand only: Google's TV emulator images are "user" builds (no root), so today this stops
-                       # at "can't turn Low Power Standby on". Kept for a rooted image or a userdebug build.
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["tools/tv-standby-lab.sh", "tools/lab/**", ".github/workflows/tv-standby-lab.yml"]
 permissions:
   contents: read
+env:
+  CF_BRANCH: aosp-android14-gsi
+  CF_TARGET: aosp_cf_x86_64_phone-userdebug
 jobs:
   standby:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -20,26 +27,46 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Build (with the x86 library for the emulator)
-        run: ABIS=android/arm,android/386 bash tv-app/build.sh 2>&1 | tail -3
-      - name: Let the emulator use the machine's virtualization
+      - name: Build the app (with x86 libraries) and the test tool
         run: |
+          ABIS=android/arm,android/386,android/amd64 bash tv-app/build.sh 2>&1 | tail -2
+          J=$(find tv-app/build/sdk/platforms -name android.jar | head -1); D8=$(find tv-app/build/build-tools -name d8 | head -1)
+          mkdir -p lps && javac -source 8 -target 8 -nowarn -cp "$J" -d lps tools/lab/Lps.java && "$D8" --output lps lps/Lps.class && ls -la lps/classes.dex
+      - name: Cuttlefish host tools
+        run: |
+          sudo curl -fsSL https://us-apt.pkg.dev/doc/repo-signing-key.gpg -o /etc/apt/trusted.gpg.d/artifact-registry.asc
+          echo "deb https://us-apt.pkg.dev/projects/android-cuttlefish-artifacts android-cuttlefish main" | sudo tee /etc/apt/sources.list.d/cuttlefish.list
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cuttlefish-base 2>&1 | tail -3
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: android-tv
-          arch: x86
-          profile: tv_1080p
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          disable-animations: false
-          script: bash tools/tv-standby-lab.sh tv-app/out/claudes-computer.apk standby-out
+          sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm
+          sudo usermod -aG kvm,cvdnetwork,render "$USER"
+          ls -la /dev/kvm; df -h / | tail -1
+      - name: Download the Android 14 userdebug build
+        run: |
+          BUILD=$(curl -fsSL "https://ci.android.com/builds/branches/$CF_BRANCH/status.json" | python3 -c "import json,sys,os; print(next(t['last_known_good_build'] for t in json.load(sys.stdin)['targets'] if t['name']==os.environ['CF_TARGET']))")
+          echo "build $BUILD"; BASE="https://ci.android.com/builds/submitted/$BUILD/$CF_TARGET/latest/raw"
+          mkdir -p "$HOME/cf" && cd "$HOME/cf"
+          curl -fsSL -o host.tar.gz "$BASE/cvd-host_package.tar.gz" && tar xzf host.tar.gz && rm host.tar.gz
+          curl -fsSL -o img.zip "$BASE/${CF_TARGET%-userdebug}-img-$BUILD.zip" && unzip -q img.zip && rm img.zip
+          ls | head -20; df -h / | tail -1
+      - name: Boot it
+        run: |
+          cd "$HOME/cf"
+          sudo -u "$USER" -H env HOME="$HOME/cf" "$HOME/cf/bin/launch_cvd" --daemon --report_anonymous_usage_stats=n \
+            --gpu_mode=guest_swiftshader --memory_mb=6144 --cpus=4 --enable_sandbox=false 2>&1 | tail -15
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          for i in $(seq 1 90); do adb connect 127.0.0.1:6520 >/dev/null 2>&1; [ "$(adb -s 127.0.0.1:6520 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break; sleep 5; done
+          adb devices
+      - name: Standby test
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH" CCRD_ADB_CONNECT=127.0.0.1:6520 ANDROID_SERIAL=127.0.0.1:6520 LPS_DEX=$PWD/lps/classes.dex
+          bash tools/tv-standby-lab.sh tv-app/out/claudes-computer.apk standby-out
       - name: Summary
         if: always()
         run: |
           echo '```' >> "$GITHUB_STEP_SUMMARY"; cat standby-out/summary.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null; echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cp "$HOME"/cf/cuttlefish/instances/cvd-1/logs/launcher.log standby-out/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
