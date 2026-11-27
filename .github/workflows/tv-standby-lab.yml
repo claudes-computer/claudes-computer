@@ -3,24 +3,14 @@
 # summary; the raw dumps are its artifacts. Runs when the script changes, and by hand.
 name: TV standby lab
 on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ["tools/tv-standby-lab.sh", ".github/workflows/tv-standby-lab.yml"]
+  workflow_dispatch:   # by hand only: Google's TV emulator images are "user" builds (no root), so today this stops
+                       # at "can't turn Low Power Standby on". Kept for a rooted image or a userdebug build.
 permissions:
   contents: read
 jobs:
   standby:
     runs-on: ubuntu-24.04
     timeout-minutes: 50
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {api: 33, target: android-tv}
-          - {api: 34, target: google-tv}
-          - {api: 35, target: android-tv}
-    name: ${{ matrix.target }} API ${{ matrix.api }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -39,8 +29,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: ${{ matrix.api }}
-          target: ${{ matrix.target }}
+          api-level: 34
+          target: android-tv
           arch: x86
           profile: tv_1080p
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
@@ -53,5 +43,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: standby-lab-${{ matrix.target }}-${{ matrix.api }}
+          name: standby-lab
           path: standby-out
