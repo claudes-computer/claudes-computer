@@ -9,7 +9,7 @@
 #   run-from-image.sh stop       stop everything running from the image
 #
 # Settings (environment): CCRD_ROOT (default ~/ccrd-root), CCRD_NAME, CCRD_TZ, CCRD_KBPS, CCRD_FPS, CCRD_TS_AUTHKEY,
-# HTTPS_PROXY, CCRD_IMPORT_STATE. Behind a proxy that refuses Tailscale's own upgrades, also TS_CONTROL_WEBSOCKET=1 TS_DERP_WEBSOCKET=1.
+# HTTPS_PROXY, CCRD_IMPORT_STATE, CCRD_INBOX (see below). Behind a proxy that refuses Tailscale's own upgrades, also TS_CONTROL_WEBSOCKET=1 TS_DERP_WEBSOCKET=1.
 # Must run as root. Output of the desktop's start-up: $CCRD_ROOT/start.log.
 R=${CCRD_ROOT:-$HOME/ccrd-root}; F=$R/rootfs
 IMAGE=${CCRD_IMAGE:-ghcr.io/claudes-computer/claudes-computer:latest}
@@ -106,6 +106,23 @@ run_inside(){
   ${CCRD_FPS:+CCRD_FPS=$CCRD_FPS} ${CCRD_TS_AUTHKEY:+CCRD_TS_AUTHKEY=$CCRD_TS_AUTHKEY} \
   /opt/claudes-computer/cloud/docker-start.sh >> $R/start.log 2>&1 < /dev/null
 }
+# Inbox: CCRD_INBOX is a folder on this machine (outside the desktop) whose pictures and videos should show up on
+# the desktop, e.g. where the machine's agent saves what it generates. They're copied every 10 seconds into a folder
+# on the desktop named CCRD_INBOX_NAME (default "Inbox"), owned by the desktop's user. Copies only: never deletes.
+inbox(){
+  local to=$F/home/desk/Desktop/${CCRD_INBOX_NAME:-Inbox} own f
+  own=$(stat -c %u:%g $F/home/desk 2>/dev/null) || return
+  mkdir -p "$to" && chown $own "$to" "$(dirname "$to")"
+  while sleep 10; do
+    find "$CCRD_INBOX" -maxdepth 2 -type f \( -iname '*.webp' -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \
+      -o -iname '*.gif' -o -iname '*.mp4' -o -iname '*.webm' -o -iname '*.mov' -o -iname '*.mp3' -o -iname '*.wav' \) \
+      -newermt '-14 days' 2>/dev/null | while read -r f; do
+        [ -e "$to/$(basename "$f")" ] && continue
+        cp -p "$f" "$to/" && chown $own "$to/$(basename "$f")" && chmod 644 "$to/$(basename "$f")"
+      done
+  done
+}
+[ -n "$CCRD_INBOX" ] && [ -d "$CCRD_INBOX" ] && { inbox & }
 # In the service: stay in the foreground, so the service lives as long as the desktop.
 [ -n "$CCRD_IN_SERVICE" ] && { run_inside; exit; }
 run_inside & disown

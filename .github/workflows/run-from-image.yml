@@ -19,7 +19,7 @@ jobs:
       - name: First start (downloads and unpacks the image)
         run: |
           sudo systemctl stop docker docker.socket 2>/dev/null || true
-          sudo mkdir -p /mnt/h; sudo HOME=/mnt/h bash cloud/keep-in-home.sh lab | tee out.txt
+          sudo mkdir -p /mnt/h /mnt/inbox; sudo HOME=/mnt/h CCRD_INBOX=/mnt/inbox CCRD_INBOX_NAME=Muse bash cloud/keep-in-home.sh lab | tee out.txt
           grep -q '^SIGN IN: https://login.tailscale.com/' out.txt
           grep -q '^running:.*xfce4-session=up' out.txt
       - name: The desktop session runs
@@ -28,6 +28,12 @@ jobs:
           pgrep -a xfce4-session
           for i in $(seq 1 30); do c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6081/); [ "$c" = 200 ] && break; sleep 5; done
           echo "desktop page: $c"; [ "$c" = 200 ]
+      - name: The inbox copies a new picture onto the desktop
+        run: |
+          sudo cp tv-app/res/drawable/*.png /mnt/inbox/test.png 2>/dev/null || printf 'RIFF....WEBP' | sudo tee /mnt/inbox/test.webp >/dev/null
+          for i in $(seq 1 6); do sudo ls /mnt/h/ccrd-root/rootfs/home/desk/Desktop/Muse/ 2>/dev/null | grep -q test && break; sleep 5; done
+          sudo ls -la /mnt/h/ccrd-root/rootfs/home/desk/Desktop/Muse/
+          sudo ls /mnt/h/ccrd-root/rootfs/home/desk/Desktop/Muse/ | grep -q test
       - name: Stop, then start again from the unpacked folder (as after the machine is replaced)
         run: |
           sudo CCRD_ROOT=/mnt/h/ccrd-root bash cloud/run-from-image.sh stop
