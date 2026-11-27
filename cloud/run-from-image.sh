@@ -9,7 +9,7 @@
 #   run-from-image.sh stop       stop everything running from the image
 #
 # Settings (environment): CCRD_ROOT (default ~/ccrd-root), CCRD_NAME, CCRD_TZ, CCRD_KBPS, CCRD_FPS, CCRD_TS_AUTHKEY,
-# HTTPS_PROXY. Behind a proxy that refuses Tailscale's own upgrades, also TS_CONTROL_WEBSOCKET=1 TS_DERP_WEBSOCKET=1.
+# HTTPS_PROXY, CCRD_IMPORT_STATE. Behind a proxy that refuses Tailscale's own upgrades, also TS_CONTROL_WEBSOCKET=1 TS_DERP_WEBSOCKET=1.
 # Must run as root. Output of the desktop's start-up: $CCRD_ROOT/start.log.
 R=${CCRD_ROOT:-$HOME/ccrd-root}; F=$R/rootfs
 IMAGE=${CCRD_IMAGE:-ghcr.io/claudes-computer/claudes-computer:latest}
@@ -47,6 +47,11 @@ if [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; then
   fi
   mv $R/.new/rootfs $F; rm -rf $R/.new $R/.oci $R/.old $TMPDIR; unset TMPDIR
   echo "Unpacked into $F"
+fi
+
+# A Tailscale identity from an earlier install on this machine (CCRD_IMPORT_STATE=its state folder): same computer.
+if [ -n "$CCRD_IMPORT_STATE" ] && [ -f "$CCRD_IMPORT_STATE/ts.state" ] && [ ! -f $F/state/ts.state ]; then
+  mkdir -p $F/state && cp -a "$CCRD_IMPORT_STATE/." $F/state/ && echo "Kept the Tailscale identity from $CCRD_IMPORT_STATE"
 fi
 
 # ---- Start --------------------------------------------------------------------------------------------------
