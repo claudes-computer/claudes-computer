@@ -53,11 +53,11 @@ report(){
   m=$(grep -iE "error|fail|couldn|NOT UP" $R/start.log 2>/dev/null | tail -1 | cut -c1-150); [ -n "$m" ] && echo "start.log: $m"
   return 0
 }
-case "$1" in stop) stop; echo stopped; exit 0;; status) status; exit;; report) report; exit 0;; esac
+case "$1" in stop) stop; echo stopped; exit 0;; status) status; exit;; report) report; exit 0;; restart-now) stop; shift;; esac
 
 # The settings a service started from here needs.
 svc_envs(){ envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE \
-  CCRD_INBOX CCRD_INBOX_NAME CCRD_SCREEN CCRD_DERP_REGION CCRD_LOW_MEMORY HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done; }
+  CCRD_INBOX CCRD_INBOX_NAME CCRD_SCREEN CCRD_DERP_REGION CCRD_LOW_MEMORY CCRD_TS_SSH HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done; }
 
 # Getting the image takes minutes. Where systemd runs the machine, that happens in its own service too, so a sandbox
 # that ends long commands can't cut the download off. Its output: $R/update.log.
@@ -139,7 +139,7 @@ run_inside(){
   ${TS_CONTROL_WEBSOCKET:+TS_CONTROL_WEBSOCKET=$TS_CONTROL_WEBSOCKET} ${TS_DERP_WEBSOCKET:+TS_DERP_WEBSOCKET=$TS_DERP_WEBSOCKET} \
   ${CCRD_NAME:+CCRD_NAME=$CCRD_NAME} ${CCRD_TZ:+CCRD_TZ=$CCRD_TZ} ${CCRD_KBPS:+CCRD_KBPS=$CCRD_KBPS} \
   ${CCRD_FPS:+CCRD_FPS=$CCRD_FPS} ${CCRD_TS_AUTHKEY:+CCRD_TS_AUTHKEY=$CCRD_TS_AUTHKEY} \
-  ${CCRD_SCREEN:+CCRD_SCREEN=$CCRD_SCREEN} ${CCRD_DERP_REGION:+CCRD_DERP_REGION=$CCRD_DERP_REGION} ${CCRD_LOW_MEMORY:+CCRD_LOW_MEMORY=$CCRD_LOW_MEMORY} \
+  ${CCRD_SCREEN:+CCRD_SCREEN=$CCRD_SCREEN} ${CCRD_DERP_REGION:+CCRD_DERP_REGION=$CCRD_DERP_REGION} ${CCRD_LOW_MEMORY:+CCRD_LOW_MEMORY=$CCRD_LOW_MEMORY} ${CCRD_TS_SSH:+CCRD_TS_SSH=$CCRD_TS_SSH} \
   /opt/claudes-computer/cloud/docker-start.sh >> $R/start.log 2>&1 < /dev/null
 }
 # Inbox: CCRD_INBOX is a folder on this machine (outside the desktop) whose pictures and videos should show up on
@@ -159,6 +159,23 @@ inbox(){
   done
 }
 [ -n "$CCRD_INBOX" ] && [ -d "$CCRD_INBOX" ] && { inbox & }
+# Request box: root inside the desktop's world (e.g. over Tailscale SSH) writes one word to /state/ccrd-request, and
+# this service does it on the machine itself: report (into /state/ccrd-report), restart, or update.
+requests(){
+  local q=$F/state/ccrd-request me; me=$(readlink -f "$0")
+  while sleep 10; do
+    [ -s "$q" ] || continue
+    r=$(head -c 20 "$q" | tr -dc 'a-z'); rm -f "$q"
+    case "$r" in
+      report)  bash "$me" report > $F/state/ccrd-report 2>&1;;
+      update)  echo "update requested $(date)" > $F/state/ccrd-report
+               svc_envs; env -u CCRD_IN_SERVICE systemd-run --unit=ccrd-request --collect "${envs[@]}" bash "$me" --update >/dev/null 2>&1;;
+      restart) echo "restart requested $(date)" > $F/state/ccrd-report
+               svc_envs; env -u CCRD_IN_SERVICE systemd-run --unit=ccrd-request --collect "${envs[@]}" bash "$me" restart-now >/dev/null 2>&1;;
+    esac
+  done
+}
+[ -n "$CCRD_IN_SERVICE" ] && { requests & }
 # In the service: stay in the foreground, so the service lives as long as the desktop.
 [ -n "$CCRD_IN_SERVICE" ] && { run_inside; exit; }
 run_inside & disown

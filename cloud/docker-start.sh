@@ -30,5 +30,9 @@ if ! $D/tailscale --socket=$D/ts.sock status >/dev/null 2>&1; then
   echo "Sign this computer in to your Tailscale (the link appears below):"
   $D/tailscale --socket=$D/ts.sock up --hostname="$($D/computer-name.sh)" --accept-dns=false &
 fi
+# CCRD_TS_SSH=1: Tailscale SSH into this computer from the owner's own tailnet (allowed by the tailnet's SSH rules),
+# so it can be looked after without the machine's agent. Set once signed in.
+[ -n "$CCRD_TS_SSH" ] && ( for i in $(seq 1 90); do
+  $D/tailscale --socket=$D/ts.sock status >/dev/null 2>&1 && { $D/tailscale --socket=$D/ts.sock set --ssh; break; }; sleep 10; done ) &
 # Keep it repaired: desktop-on.sh is safe to run again and fixes whatever stopped.
 while sleep 300; do $D/desktop-on.sh >/dev/null 2>&1; done

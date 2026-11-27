@@ -34,6 +34,15 @@ jobs:
           for i in $(seq 1 6); do sudo ls /mnt/h/ccrd-root/rootfs/home/desk/Desktop/Muse/ 2>/dev/null | grep -q test && break; sleep 5; done
           sudo ls -la /mnt/h/ccrd-root/rootfs/home/desk/Desktop/Muse/
           sudo ls /mnt/h/ccrd-root/rootfs/home/desk/Desktop/Muse/ | grep -q test
+      - name: The request box (report, then restart) works from inside the desktop's world
+        run: |
+          F=/mnt/h/ccrd-root/rootfs
+          echo report | sudo tee $F/state/ccrd-request >/dev/null
+          for i in $(seq 1 12); do sudo test -s $F/state/ccrd-report && break; sleep 5; done; sudo cat $F/state/ccrd-report
+          sudo grep -q "^running:" $F/state/ccrd-report
+          old=$(pgrep -x xfce4-session); echo restart | sudo tee $F/state/ccrd-request >/dev/null
+          for i in $(seq 1 36); do n=$(pgrep -x xfce4-session); [ -n "$n" ] && [ "$n" != "$old" ] && break; sleep 5; done
+          echo "xfce4-session before $old, after $n"; [ -n "$n" ] && [ "$n" != "$old" ]
       - name: Stop, then start again from the unpacked folder (as after the machine is replaced)
         run: |
           sudo CCRD_ROOT=/mnt/h/ccrd-root bash cloud/run-from-image.sh stop
