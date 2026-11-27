@@ -57,6 +57,12 @@ for mon in $( (xfconf-query -c xfce4-desktop -l; printf '%s\n' /backdrop/screen0
   done
 done
 xfdesktop --reload >/dev/null 2>&1
+# Windows-style snapping from the keyboard (dragging a window to an edge or corner already snaps): Windows key with
+# the arrows for halves (Ctrl or Shift as well for the top or bottom quarters, set by XFCE itself), Up to maximize.
+for k in "<Super>Left tile_left_key" "<Super>Right tile_right_key" "<Super>Up maximize_window_key"; do set -- $k
+  xfconf-query -c xfce4-keyboard-shortcuts -p "/xfwm4/custom/$1" -n -t string -s "$2" 2>/dev/null \
+    || xfconf-query -c xfce4-keyboard-shortcuts -p "/xfwm4/custom/$1" -s "$2"
+done
 # XFCE only runs desktop launchers the user has trusted: newer versions check a checksum, older ones a flag.
 gio set $HOME/Desktop/chrome.desktop metadata::trusted true 2>/dev/null
 gio set -t string $HOME/Desktop/chrome.desktop metadata::xfce-exe-checksum "$(sha256sum $HOME/Desktop/chrome.desktop | cut -d' ' -f1)" 2>/dev/null

@@ -78,7 +78,9 @@ addresses are private: never put them in this repository.
 
 **Driving the desktop:** use the accessibility tree, not screenshots: `/opt/ccrd/a11y.py apps|tree|do|focus`
 run as `desk` with DISPLAY=:1 and the session's DBUS_SESSION_BUS_ADDRESS (from xfce4-session's environment).
-Screenshots only when stuck. Work on your own workspace (the second, "Claude's"): `/opt/ccrd/claude-window.sh URL`
+Screenshots only when stuck. Arrange windows with XFCE's own snapping, never pixel geometry (Chrome's borders
+leave gaps): activate the window, then `xdotool key super+KP_Left` / `super+KP_Right` for halves, `super+KP_Home`,
+`KP_Page_Up`, `KP_End`, `KP_Next` for quarters. Work on your own workspace (the second, "Claude's"): `/opt/ccrd/claude-window.sh URL`
 opens a Chrome window there without taking over the person's screen. Start Chrome only through `/opt/ccrd/chrome.sh`
 (it brings the desktop's sound and accessibility with it).
 
