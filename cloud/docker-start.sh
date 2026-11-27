@@ -28,7 +28,7 @@ mkdir -p "${CCRD_STATE_DIR:-/state}"
 $D/desktop-on.sh
 if ! $D/tailscale --socket=$D/ts.sock status >/dev/null 2>&1; then
   echo "Sign this computer in to your Tailscale (the link appears below):"
-  $D/tailscale-up.sh &
+  $D/tailscale --socket=$D/ts.sock up --hostname="$($D/computer-name.sh)" --accept-dns=false &
 fi
 # Keep it repaired: desktop-on.sh is safe to run again and fixes whatever stopped.
 while sleep 300; do $D/desktop-on.sh >/dev/null 2>&1; done
