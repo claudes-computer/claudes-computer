@@ -16,7 +16,17 @@ IMAGE=${CCRD_IMAGE:-ghcr.io/claudes-computer/claudes-computer:latest}
 [ "$(id -u)" = 0 ] || { echo "run-from-image.sh must run as root"; exit 1; }
 
 inside(){ for p in /proc/[0-9]*; do [ "$(readlink $p/root 2>/dev/null)" = "$F" ] && echo ${p#/proc/}; done; }
-unmount(){ for m in $(awk -v f="$F" '$2 ~ "^"f"/" {print $2}' /proc/mounts | sort -r); do umount -l "$m" 2>/dev/null; done; }
+# Undo the desktop's mounts, in this command's view and in the machine's main view (a sandbox can give each command
+# its own view, while the service mounts in the main one).
+unmount(){
+  local m
+  for m in $(awk -v f="$F" '$2 ~ "^"f"/" {print $2}' /proc/mounts | sort -r); do umount -l "$m" 2>/dev/null; done
+  command -v nsenter >/dev/null || return 0
+  for m in $(awk -v f="$F" '$2 ~ "^"f"/" {print $2}' /proc/1/mounts 2>/dev/null | sort -r); do nsenter -t 1 -m -- umount -l "$m" 2>/dev/null; done
+}
+mounted(){ grep -q " $F/" /proc/mounts /proc/1/mounts 2>/dev/null; }
+# Deleting a folder never crosses into a mounted filesystem, and refuses while the desktop's mounts are still there.
+rmtree(){ mounted && { echo "FAILED: $F still has mounts; not deleting anything"; exit 1; }; rm -rf --one-file-system "$@"; }
 SVC=ccrd-desktop
 has_systemd(){ [ -d /run/systemd/system ] && command -v systemd-run >/dev/null; }
 stop(){ has_systemd && [ -z "$CCRD_IN_SERVICE" ] && { systemctl stop $SVC 2>/dev/null; systemctl reset-failed $SVC 2>/dev/null; }
@@ -52,15 +62,15 @@ if [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; then
     || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq skopeo umoci >/dev/null; } \
     || { echo "Couldn't install skopeo and umoci (needed to unpack the image)"; exit 1; }
   mkdir -p $R && stop
-  export TMPDIR=$R/.tmp; rm -rf $TMPDIR $R/.oci $R/.new; mkdir -p $TMPDIR
+  export TMPDIR=$R/.tmp; rmtree $TMPDIR $R/.oci $R/.new; mkdir -p $TMPDIR
   skopeo copy -q "docker://$IMAGE" "oci:$R/.oci:latest" && umoci unpack --image "$R/.oci:latest" $R/.new >/dev/null \
-    || { echo "Couldn't download or unpack $IMAGE"; rm -rf $TMPDIR $R/.oci $R/.new; exit 1; }
+    || { echo "Couldn't download or unpack $IMAGE"; rmtree $TMPDIR $R/.oci $R/.new; exit 1; }
   # Keep what belongs to this computer: the Tailscale identity (/state) and the desktop user's files.
   if [ -d $F ]; then
-    for k in state home/desk; do [ -d $F/$k ] && { rm -rf $R/.new/rootfs/$k; mv $F/$k $R/.new/rootfs/$k; }; done
-    rm -rf $R/.old; mv $F $R/.old
+    for k in state home/desk; do [ -d $F/$k ] && { rmtree $R/.new/rootfs/$k; mv $F/$k $R/.new/rootfs/$k; }; done
+    rmtree $R/.old; mv $F $R/.old
   fi
-  mv $R/.new/rootfs $F; rm -rf $R/.new $R/.oci $R/.old $TMPDIR; unset TMPDIR
+  mv $R/.new/rootfs $F; rmtree $R/.new $R/.oci $R/.old $TMPDIR; unset TMPDIR
   echo "Unpacked into $F"
 fi
 
@@ -91,7 +101,7 @@ mount --rbind /sys $F/sys && mount --make-rslave $F/sys
 mount --rbind /dev $F/dev && mount --make-rslave $F/dev
 mount -t tmpfs -o mode=755 tmpfs $F/run
 # /tmp is a folder in the kept area, not memory: its logs survive for a look afterwards, and it costs no RAM.
-rm -rf $R/tmp; mkdir -p $R/tmp; chmod 1777 $R/tmp; mount --bind $R/tmp $F/tmp
+umount -l $F/tmp 2>/dev/null; rm -rf --one-file-system $R/tmp; mkdir -p $R/tmp; chmod 1777 $R/tmp; mount --bind $R/tmp $F/tmp
 cp -L /etc/resolv.conf $F/etc/resolv.conf 2>/dev/null
 cp -L /etc/hosts $F/etc/hosts 2>/dev/null
 # This machine's proxy certificates: docker-start.sh trusts whatever is in this folder.
