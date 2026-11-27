@@ -215,7 +215,7 @@ EOF
 # ---- Choosing how to run it ---------------------------------------------------------------------------------
 plan(){
   local S; S=$(state_dir); [ -n "$S" ] && . $S/doctor.env
-  K=$(keep_dir <(echo "$KEPT" | tr ' ' '\n'))
+  K=$(keep_dir <(echo "$KEPT" | tr ' ' '\n' 2>/dev/null))
   M=$CCRD_METHOD
   if [ -z "$M" ]; then
     if [ -n "$UID0" ] && [ -x /opt/ccrd/desktop-on.sh ]; then M=native
