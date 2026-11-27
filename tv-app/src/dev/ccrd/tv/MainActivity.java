@@ -274,7 +274,7 @@ public class MainActivity extends Activity implements Runnable {
     boolean isAsleep() { return asleep && !opened; }
     void refreshHint() {
         String h = wake.hint();
-        if (MANY_COMPUTERS && picker.count() > 1) h = "This is " + ComputerPicker.label(host) + ". Press ◀ ▶ (or Ctrl+Alt+Tab) to switch computers.\n" + h;
+        if (MANY_COMPUTERS && picker.count() > 1) h = "This is " + ComputerPicker.label(host) + ". Press ◀ ▶ (on a desktop: hold Back, or Ctrl+Alt+Tab) to switch computers.\n" + h;
         web.evaluateJavascript("setWakeHint(" + JSONObject.quote(h) + ")", null);
     }
     void refreshStatus() { shown = ""; handler.post(this); }
@@ -400,10 +400,19 @@ public class MainActivity extends Activity implements Runnable {
         int code = ev.getKeyCode();
         if (picker.showing()) {                                 // the computer picker is up: it takes the keys
             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+                if (backHeld) { if (ev.getAction() == KeyEvent.ACTION_UP) backHeld = false; return true; }   // the hold that opened it
                 if (ev.getAction() == KeyEvent.ACTION_UP) picker.hide();
                 return true;
             }
             return super.dispatchKeyEvent(ev);
+        }
+        // On the remote, hold Back on a desktop to choose another computer (a short press still goes back).
+        if (MANY_COMPUTERS && opened && code == KeyEvent.KEYCODE_BACK) {
+            if (ev.getAction() == KeyEvent.ACTION_DOWN && ev.getRepeatCount() > 0) {
+                if (!backHeld) { backHeld = true; picker.show(); }
+                return true;
+            }
+            if (ev.getAction() == KeyEvent.ACTION_UP && backHeld) { backHeld = false; return true; }
         }
         // Ctrl+Alt+Tab: switch computers.
         if (MANY_COMPUTERS && code == KeyEvent.KEYCODE_TAB && ev.isCtrlPressed() && ev.isAltPressed()) {
@@ -432,12 +441,13 @@ public class MainActivity extends Activity implements Runnable {
         return super.dispatchKeyEvent(ev);
     }
     private int swallow = 0;
+    private boolean backHeld = false;
 
 
     // ---- more than one computer (ComputerPicker.java) ----
-    // Off for 1.0-alpha: the TV always shows the first computer ("ccrd"). The list, its keys and the hint come back
-    // with the computer manager (new, rename, archive) in a later version.
-    static final boolean MANY_COMPUTERS = false;
+    // On: every desktop on the tailnet (Claude sessions, ChatGPT's, Muse's) is a tile; ◀ ▶ on the status screens or
+    // Ctrl+Alt+Tab opens them.
+    static final boolean MANY_COMPUTERS = true;
     private String host = "ccrd";            // the computer this TV shows
     private ComputerPicker picker;
     String host() { return host; }

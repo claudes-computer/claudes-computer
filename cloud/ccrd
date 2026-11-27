@@ -9,6 +9,9 @@
 #   ccrd report     8 lines of status, the same on every machine: paste them as they are
 #   ccrd stay       keep a turn-bound machine awake while someone watches (ends IDLE, or AGAIN: run it again)
 #   ccrd stop       stop the desktop
+#   ccrd peers      the owner's other desktops on the tailnet (anything serving the stream on port 6081), each with
+#                   its state; ccrd report <name> shows one's 8 lines
+#   ccrd send <name|all> <text or link>   a link opens in Chrome there; text lands on its clipboard
 #
 # The walls:
 #   (a) processes  what a command starts is killed (or frozen) when the command or the agent's turn ends
@@ -289,14 +292,18 @@ up_native(){
 
 # ---- The report: the same 8 lines everywhere ----------------------------------------------------------------
 report(){
-  load_up; K=${K:-$(keep_dir /dev/null)}; local S; S=$(state_dir)
-  [ -f "$S/doctor.env" ] && . "$S/doctor.env"
+  if [ -n "$CCRD_INSIDE" ]; then   # asked from inside the desktop (talk.py): the host's facts come from ccrd-host.env
+    [ -f /opt/ccrd/ccrd-host.env ] && . /opt/ccrd/ccrd-host.env; KH=$K; M=inside; K=/
+  else load_up; K=${K:-$(keep_dir /dev/null)}; local S; S=$(state_dir)
+    [ -f "$S/doctor.env" ] && . "$S/doctor.env"; fi
   local TS="/opt/ccrd/tailscale --socket=/opt/ccrd/ts.sock" st ip name link up="" x
   name=$(X /opt/ccrd/computer-name.sh 2>/dev/null)
-  echo "ccrd $(git -C "$REPO" log -1 --format=%h 2>/dev/null) method=${M:-none} keeper=${KEEPER:-none} name=${name:-?} keep=$K"
+  local MM=$M; [ "$M" = inside ] && MM=${HM:-native}
+  echo "ccrd $(git -C "$REPO" log -1 --format=%h 2>/dev/null) method=${MM:-none} keeper=${KEEPER:-none} name=${name:-?} keep=${KH:-$K}"
   if X $TS status >/dev/null 2>&1; then ip=$(X $TS ip -4 2>/dev/null); st="READY: on Tailscale as $name ($ip)"
   else
-    case $M in docker) link=$(docker logs ccrd 2>&1 | grep -o 'https://login.tailscale.com/[^ ]*' | tail -1);;
+    case $M in inside) link=$(grep -ho 'https://login.tailscale.com/[^ ]*' /tmp/ccrd-up.log /opt/ccrd/tailscale-up.log /tmp/tsup.log 2>/dev/null | tail -1);;
+      docker) link=$(docker logs ccrd 2>&1 | grep -o 'https://login.tailscale.com/[^ ]*' | tail -1);;
       image) link=$(grep -o 'https://login.tailscale.com/[^ ]*' $K/ccrd-root/start.log 2>/dev/null | tail -1);;
       *) link=$(grep -ho 'https://login.tailscale.com/[^ ]*' /tmp/ccrd-up.log /opt/ccrd/tailscale-up.log 2>/dev/null | tail -1);; esac
     [ -n "$link" ] && st="SIGN IN: $link" || st="NOT UP"; fi
@@ -309,6 +316,7 @@ report(){
   local pg; pg=$(X curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:6081/ 2>/dev/null); [ "${pg:-000}" = 000 ] && pg=none
   echo "desktop page: $pg${relay:+, relay $relay}"
   local m=""; case $M in
+    inside) m="";;
     docker) m=$(docker logs ccrd 2>&1 | grep -iE "error|fatal|fail" | tail -1);;
     image) m=$(grep -hiE "error|fatal|fail|NOT UP" $K/ccrd-root/start.log $K/ccrd-root/update.log 2>/dev/null | tail -1);;
     *) m=$(grep -hiE "error|fatal|fail" /tmp/ccrd-up.log 2>/dev/null | tail -1);; esac
@@ -319,6 +327,18 @@ report(){
   [ "$E" = wall ] && fix="${fix:+$fix, }low-memory settings"
   [ "$D" != ok ] && [ "$M" = image ] && fix="${fix:+$fix, }re-run 'ccrd up' after each replacement"
   echo "settings for the walls: ${fix:-none needed}"
+  [ -z "$CCRD_INSIDE" ] && push_host_env
+  return 0
+}
+# The desktop's own report (asked by the owner's other desktops) needs the facts only the host knows.
+push_host_env(){
+  local S; S=$(state_dir); [ -n "$S" ] || return 0
+  local env; env=$( { printf 'HM=%s\nK=%s\nKEEPER=%q\n' "$M" "$K" "$KEEPER"; grep -E '^(A|B|C|D|E|UPGRADE|INTERCEPT|PROXY_NAME_WRONG)=' $S/doctor.env 2>/dev/null; } )
+  case $M in
+    docker) echo "$env" | docker exec -i ccrd sh -c 'cat > /opt/ccrd/ccrd-host.env' 2>/dev/null;;
+    image) [ -d $K/ccrd-root/rootfs/opt/ccrd ] && echo "$env" > $K/ccrd-root/rootfs/opt/ccrd/ccrd-host.env;;
+    native) [ -d /opt/ccrd ] && [ -w /opt/ccrd ] && echo "$env" > /opt/ccrd/ccrd-host.env;;
+  esac
 }
 
 case "$1" in
@@ -330,7 +350,9 @@ case "$1" in
     case $M in docker) up_docker;; image) up_image;; native) up_native;; *) echo "FAILED: no way to run a desktop here (ccrd doctor shows why)"; exit 1;; esac
     for d in $(cands); do [ -O $d/.ccrd ] && printf 'M=%s\nK=%s\nKEEPER=%q\n' "$M" "$K" "$KEEPER" > $d/.ccrd/up.env; done
     report;;
-  report) report;;
+  report) if [ -n "$2" ]; then load_up; X python3 /opt/ccrd/talk.py report "$2"; else report; fi;;
+  peers) load_up; X python3 /opt/ccrd/talk.py peers;;
+  send) load_up; shift; X python3 /opt/ccrd/talk.py send "$@";;
   stay) load_up; case $M in
       docker) docker exec -e IDLE_LIMIT=${IDLE_LIMIT:-900} -e MAX=${MAX:-1500} ccrd /opt/ccrd/keepawake.sh | tail -1 | sed 's/^REARM.*/AGAIN: still in use/';;
       *) X /opt/ccrd/keepawake.sh | tail -1;; esac;;

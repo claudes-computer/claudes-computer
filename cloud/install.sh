@@ -128,7 +128,7 @@ done
 for s in desktop-on.sh keepawake.sh apply-look.sh fix-python-apps.sh \
          chrome.sh firefox.sh \
          tailscale-up.sh ts-join.sh home-route.sh tv-keep.sh wake-token.sh house-check.sh \
-         save.sh restore.sh chrome-db-check.py vault-password.sh a11y.py tv-update.sh claude-window.sh patch-selkies-audio.sh computer-name.sh tv-helper-setup.sh tv-open.sh tv-remote.py tv-standby-test.sh; do
+         save.sh restore.sh chrome-db-check.py vault-password.sh a11y.py tv-update.sh claude-window.sh patch-selkies-audio.sh computer-name.sh tv-helper-setup.sh tv-open.sh tv-remote.py tv-standby-test.sh ccrd talk.py; do
   install -m 755 "$HERE/$s" $D/$s
 done
 cp "$HERE/wallpaper.png" $D/wallpaper.png
@@ -139,6 +139,8 @@ A=/usr/share/applications
 cp "$HERE/files/chrome.desktop" $A/chrome.desktop
 install -m 755 "$HERE/files/chrome.desktop" $H/Desktop/chrome.desktop
 cp "$HERE/files/welcome.desktop" $A/ccrd-welcome.desktop
+cp "$HERE/files/send.desktop" $A/ccrd-send.desktop
+install -m 755 "$HERE/files/send.desktop" $H/Desktop/ccrd-send.desktop
 cp "$HERE/files/welcome-autostart.desktop" $H/.config/autostart/ccrd-welcome.desktop
 # Every Chrome launcher (file associations, other apps) must go through our wrapper: stock Chrome won't start here.
 ln -sf $D/chrome.sh /usr/bin/google-chrome-stable

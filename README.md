@@ -112,6 +112,10 @@ These work, but they're rougher, and nothing here is needed. Ask Claude for any 
   an egress proxy, partial root, a machine that's replaced, tight memory) and shows the evidence; `cloud/ccrd up`
   picks how to run and keep the desktop from that; `cloud/ccrd report` gives the same 8 status lines everywhere.
   Each machine's repo is just its settings file and a 10-line `up`.
+- **All your desktops in one place.** The TV app lists every desktop on your Tailscale as a tile (Claude sessions,
+  ChatGPT's, Muse's: anything serving the stream): ◀ ▶ on the status screen, or hold Back on a desktop. On any desktop,
+  **Send to another computer** sends text (it lands on that one's clipboard) or a link (it opens there);
+  `ccrd peers` lists them with their state, and `ccrd report <name>` shows one's status.
 - **The TV's microphone** on the desktop: **Ctrl+Alt+M** turns it on and off (a badge shows while it's on).
 
 **Coming soon:** more than one computer, managed from the TV: start a new one, name it, archive it, switch between

@@ -97,6 +97,11 @@ pgrep -x cupsd >/dev/null || /usr/sbin/cupsd 2>/dev/null
  as env DBUS_SESSION_BUS_ADDRESS="$DB" busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
 ) >/dev/null 2>&1 &
 
+# Desktops made before "Send to another computer" existed get its icon once (deleting it afterwards sticks).
+[ -f /usr/share/applications/ccrd-send.desktop ] && [ ! -f $H/.config/ccrd-send-icon ] && [ -d $H/Desktop ] && {
+  install -o $U -g $U -m 755 /usr/share/applications/ccrd-send.desktop $H/Desktop/ccrd-send.desktop
+  mkdir -p $H/.config && touch $H/.config/ccrd-send-icon && chown $U: $H/.config/ccrd-send-icon; rm -f /run/ccrd-icons-trusted; }
+
 # Desktop icons must be executable and carry XFCE's "trusted" mark (a Drive restore can drop both), or opening one asks about an "Untrusted application launcher".
 # The mark can be lost when the machine restarts, so set it again once per boot (in the desktop's own session).
 [ -f /run/ccrd-icons-trusted ] || (touch /run/ccrd-icons-trusted; for i in $(seq 1 15); do
@@ -170,6 +175,10 @@ have=$($TS status --json 2>/dev/null | python3 -c 'import json,sys; print((json.
 mkdir -p $D/tv
 pgrep -f "^python3 -m http.server 6083" >/dev/null \
   || (setsid python3 -m http.server 6083 --bind 127.0.0.1 --directory $D/tv >/tmp/tvconfig.log 2>&1 &)
+
+# Talking to the owner's other desktops (talk.py): text and links arrive here, and they can read this one's report.
+# Port 6085, reachable over the tailnet like the desktop itself.
+pgrep -f "talk.py serve" >/dev/null || (setsid python3 $D/talk.py serve >/tmp/talk.log 2>&1 &)
 
 # HTTPS address on the tailnet (https://<name>.<tailnet>.ts.net), so any browser on your Tailscale can open the
 # desktop: phones and tablets need a secure address to play the stream. Tailnet-only, certificate from Tailscale.

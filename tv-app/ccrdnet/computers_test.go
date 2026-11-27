@@ -39,3 +39,17 @@ func TestSameDevice(t *testing.T) {
 		}
 	}
 }
+
+func TestSetDesktopAcceptsFoundDesktops(t *testing.T) {
+	mu.Lock()
+	found["muse-box"] = true
+	mu.Unlock()
+	SetDesktop("Muse-Box")
+	if Desktop() != "muse-box" {
+		t.Fatalf("got %q", Desktop())
+	}
+	SetDesktop("laptop") // not a desktop name and never found serving the stream
+	if Desktop() != "ccrd" {
+		t.Fatalf("got %q", Desktop())
+	}
+}

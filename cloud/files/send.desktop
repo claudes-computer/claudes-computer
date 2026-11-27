@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Send to another computer
+Comment=Send text or a link to one of your other computers
+Exec=/opt/ccrd/talk.py ui
+Icon=mail-send
+Categories=Network;Utility;

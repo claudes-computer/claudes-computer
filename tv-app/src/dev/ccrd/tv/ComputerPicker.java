@@ -5,8 +5,9 @@ import android.view.View;
 
 import ccrdnet.Ccrdnet;
 
-/** More than one computer: every Claude session is its own computer (ccrdnet computers.go). This is the
- *  "Which computer?" list over the desktop or the status screen, and the count of computers this TV can see. */
+/** More than one computer: every Claude session is its own computer, and so is every other agent's desktop on the
+ *  tailnet (Codex's, Muse's: anything serving the stream; ccrdnet computers.go). This is the "Choose a computer"
+ *  tiles over the desktop or the status screen, and the count of computers this TV can see. */
 class ComputerPicker {
     private final MainActivity act;
     private final android.widget.FrameLayout root;
@@ -19,9 +20,10 @@ class ComputerPicker {
     boolean showing() { return picker != null; }
     int count() { return computers; }
 
-    /** "ccrd" is the first computer; "ccrd-work" is "Work". */
+    /** "ccrd" is Claude's; "ccrd-codex" is ChatGPT's, "ccrd-muse" Muse's; "ccrd-work" is "Work". */
     static String label(String h) {
-        if ("ccrd".equals(h)) return "Your computer";
+        if ("ccrd".equals(h)) return "Claude";
+        if ("ccrd-codex".equals(h)) return "ChatGPT";
         String n = h.startsWith("ccrd-") ? h.substring(5) : h;
         n = n.replace('-', ' ');
         return n.isEmpty() ? h : Character.toUpperCase(n.charAt(0)) + n.substring(1);
@@ -66,18 +68,24 @@ class ComputerPicker {
         card.addView(title);
 
         android.view.View first = null;
+        final int perRow = 3;
+        android.widget.LinearLayout line = null;
         for (int i = 0; i < a.length(); i++) {
             org.json.JSONObject c = a.optJSONObject(i);
             if (c == null) continue;
             final String h = c.optString("host");
             boolean on = c.optBoolean("online"), current = h.equals(act.host());
-            android.view.View row = row(label(h), on, current);
-            row.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { act.switchTo(h); } });
-            android.widget.LinearLayout.LayoutParams rp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-            rp.setMargins(0, 0, 0, Ui.dp(act, 6));
-            card.addView(row, rp);
-            if (first == null || current) first = row;
+            if (line == null || line.getChildCount() == perRow) {
+                line = new android.widget.LinearLayout(act);
+                line.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                card.addView(line);
+            }
+            android.view.View tile = tile(h, on, current);
+            tile.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { act.switchTo(h); } });
+            android.widget.LinearLayout.LayoutParams tp = new android.widget.LinearLayout.LayoutParams(Ui.dp(act, 196), Ui.dp(act, 132));
+            tp.setMargins(Ui.dp(act, 6), Ui.dp(act, 6), Ui.dp(act, 6), Ui.dp(act, 6));
+            line.addView(tile, tp);
+            if (first == null || current) first = tile;
         }
         if (a.length() == 0) {
             android.widget.TextView none = Ui.text(act, "No computers found yet.", 17, Ui.MUTED, Ui.REGULAR);
@@ -85,13 +93,14 @@ class ComputerPicker {
             card.addView(none);
         }
         android.widget.TextView how = Ui.text(act,
-            "To add one, start another Claude session and say \u201cdesktop on, call it Work\u201d.", 14, Ui.MUTED, Ui.REGULAR);
+            "Every desktop on your Tailscale shows up here: another Claude session (“desktop on, call it Work”), "
+            + "or ChatGPT's and Muse's computers.", 14, Ui.MUTED, Ui.REGULAR);
         how.setLineSpacing(0, 1.25f);
-        how.setPadding(Ui.dp(act, 6), Ui.dp(act, 14), Ui.dp(act, 6), 0);
-        card.addView(how);
+        how.setPadding(Ui.dp(act, 8), Ui.dp(act, 14), Ui.dp(act, 8), 0);
+        card.addView(how, new android.widget.LinearLayout.LayoutParams(Ui.dp(act, 3 * 208), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
 
         android.widget.FrameLayout.LayoutParams cl = new android.widget.FrameLayout.LayoutParams(
-            Ui.dp(act, 520), android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER);
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER);
         scrim.addView(card, cl);
         root.addView(scrim, new android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
@@ -101,33 +110,46 @@ class ComputerPicker {
         if (first != null) first.requestFocus();
     }
 
-    /** One computer: its name, a check if it's the one on screen, and whether it's on or asleep. */
-    private android.view.View row(String name, boolean on, boolean current) {
-        final android.widget.LinearLayout r = new android.widget.LinearLayout(act);
-        r.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        r.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(act, 16), Ui.dp(act, 14), Ui.dp(act, 16), Ui.dp(act, 14));
-        r.setFocusable(true); r.setClickable(true);
-        final android.graphics.drawable.Drawable idle = Ui.round(act, 0x00000000, 14, 0);
-        final android.graphics.drawable.Drawable lit = Ui.round(act, Ui.white(26), 14, 0x99D97757);
-        r.setBackground(idle);
-        r.setOnFocusChangeListener(new View.OnFocusChangeListener() { public void onFocusChange(View v, boolean f) {
+    /** Each desktop's own colors, from its wallpaper: Claude's coral on dark, ChatGPT's white on black, Muse's
+     *  lavender with dark text; others plain. {background, text}. */
+    static int[] colors(String h) {
+        if ("ccrd".equals(h)) return new int[] { 0xFF262626, 0xFFF2F2F2, 0xFFD97757 };
+        if ("ccrd-codex".equals(h)) return new int[] { 0xFF0B0C0C, 0xFFFFFFFF, 0xFFFFFFFF };
+        if ("ccrd-muse".equals(h)) return new int[] { 0xFFCDD0FD, 0xFF14141F, 0xFF14141F };
+        return new int[] { 0xFF303030, 0xFFF2F2F2, 0xFFD97757 };
+    }
+
+    /** One computer as a tile: its name big, whether it's on or asleep, and a check if it's the one on screen. */
+    private android.view.View tile(String h, boolean on, boolean current) {
+        final int[] col = colors(h);
+        final android.widget.LinearLayout t = new android.widget.LinearLayout(act);
+        t.setOrientation(android.widget.LinearLayout.VERTICAL);
+        t.setGravity(android.view.Gravity.BOTTOM);
+        t.setPadding(Ui.dp(act, 16), Ui.dp(act, 12), Ui.dp(act, 16), Ui.dp(act, 14));
+        t.setFocusable(true); t.setClickable(true);
+        final android.graphics.drawable.Drawable idle = Ui.round(act, col[0], 16, current ? col[2] : Ui.EDGE);
+        final android.graphics.drawable.Drawable lit = Ui.round(act, col[0], 16, 0xFFFFFFFF);
+        t.setBackground(idle);
+        if (!on) t.setAlpha(0.6f);
+        t.setOnFocusChangeListener(new View.OnFocusChangeListener() { public void onFocusChange(View v, boolean f) {
             v.setBackground(f ? lit : idle);
+            v.animate().scaleX(f ? 1.05f : 1f).scaleY(f ? 1.05f : 1f).setDuration(120).start();
         } });
 
-        android.widget.TextView check = Ui.text(act, current ? "\u2713" : "", 18, Ui.CORAL, Ui.MEDIUM);
-        check.setGravity(android.view.Gravity.CENTER);
-        r.addView(check, new android.widget.LinearLayout.LayoutParams(Ui.dp(act, 26), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        android.widget.TextView top = Ui.text(act, current ? "\u2713 On screen" : "", 13, col[2], Ui.MEDIUM);
+        t.addView(top, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        android.widget.TextView n = Ui.text(act, name, 19, Ui.TEXT, current ? Ui.MEDIUM : Ui.REGULAR);
-        r.addView(n, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.TextView n = Ui.text(act, label(h), 24, col[1], Ui.MEDIUM);
+        n.setSingleLine(true); n.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.addView(n);
 
-        android.widget.TextView st = Ui.text(act, on ? "On" : "Asleep", 14, Ui.MUTED, Ui.REGULAR);
+        android.widget.TextView st = Ui.text(act, on ? "On" : "Asleep", 14, col[1], Ui.REGULAR);
+        st.setAlpha(0.75f);
         st.setCompoundDrawablesWithIntrinsicBounds(Ui.dot(act, on ? Ui.ON : 0xFF6B6B6B, 7), null, null, null);
         st.setCompoundDrawablePadding(Ui.dp(act, 7));
         st.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        r.addView(st);
-        return r;
+        t.addView(st);
+        return t;
     }
 
     void hide() {
