@@ -76,7 +76,7 @@ if [ -n "$(inside)" ] && $TS status >/dev/null 2>&1; then echo "Already running.
 # (some sandboxes end everything a command started, and give each command its own view of the mounts).
 if [ -z "$CCRD_IN_SERVICE" ] && has_systemd; then
   stop
-  envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE \
+  envs=(); for v in HOME CCRD_ROOT CCRD_IMAGE CCRD_NAME CCRD_TZ CCRD_KBPS CCRD_FPS CCRD_TS_AUTHKEY CCRD_IMPORT_STATE CCRD_INBOX CCRD_INBOX_NAME \
                     HTTPS_PROXY https_proxy TS_CONTROL_WEBSOCKET TS_DERP_WEBSOCKET; do [ -n "${!v}" ] && envs+=(-E "$v=${!v}"); done
   : > $R/start.log
   systemd-run --unit=$SVC --collect -p Restart=on-failure -p RestartSec=10 -E CCRD_IN_SERVICE=1 "${envs[@]}" \
