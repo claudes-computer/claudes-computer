@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["cloud/run-from-image.sh", ".github/workflows/run-from-image.yml"]
+    paths: ["cloud/run-from-image.sh", "cloud/keep-in-home.sh", ".github/workflows/run-from-image.yml"]
 permissions:
   contents: read
 jobs:
@@ -17,8 +17,9 @@ jobs:
       - name: First start (downloads and unpacks the image)
         run: |
           sudo systemctl stop docker docker.socket 2>/dev/null || true
-          sudo CCRD_ROOT=/mnt/ccrd-root CCRD_NAME=lab bash cloud/run-from-image.sh | tee out.txt
+          sudo mkdir -p /mnt/h; sudo HOME=/mnt/h bash cloud/keep-in-home.sh lab | tee out.txt
           grep -q '^SIGN IN: https://login.tailscale.com/' out.txt
+          grep -q '^running:.*xfce4-session=up' out.txt
       - name: The desktop session runs
         run: |
           for i in $(seq 1 24); do pgrep -x xfce4-session >/dev/null && break; sleep 5; done
@@ -27,13 +28,15 @@ jobs:
           echo "desktop page: $c"; [ "$c" = 200 ]
       - name: Stop, then start again from the unpacked folder (as after the machine is replaced)
         run: |
-          sudo CCRD_ROOT=/mnt/ccrd-root bash cloud/run-from-image.sh stop
+          sudo CCRD_ROOT=/mnt/h/ccrd-root bash cloud/run-from-image.sh stop
           sleep 3; ! pgrep -x xfce4-session
           start=$(date +%s)
-          sudo CCRD_ROOT=/mnt/ccrd-root CCRD_NAME=lab bash cloud/run-from-image.sh | tee out2.txt
+          sudo CCRD_ROOT=/mnt/h/ccrd-root CCRD_NAME=lab bash cloud/run-from-image.sh | tee out2.txt
           grep -q '^SIGN IN:' out2.txt; ! grep -q 'Getting the desktop image' out2.txt
           for i in $(seq 1 24); do pgrep -x xfce4-session >/dev/null && break; sleep 5; done
           pgrep -a xfce4-session; echo "restart took $(( $(date +%s) - start )) s"
+      - name: The short report
+        run: sudo /mnt/h/computer/start report
       - if: failure()
         run: |
-          sudo tail -60 /mnt/ccrd-root/start.log || true
+          sudo tail -60 /mnt/h/ccrd-root/start.log || true

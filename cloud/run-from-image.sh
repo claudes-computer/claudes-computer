@@ -28,7 +28,19 @@ status(){
   done
   echo "NOT UP. Last lines of $R/start.log:"; tail -15 $R/start.log 2>/dev/null; return 1
 }
-case "$1" in stop) stop; echo stopped; exit 0;; status) status; exit;; esac
+# A few short lines for an agent whose tools only show it a summary of long output.
+report(){
+  local up m
+  echo "uptime_min=$(awk '{print int($1/60)}' /proc/uptime) mem_avail_mb=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo) home_free_gb=$(df -BG --output=avail $R 2>/dev/null | tail -1 | tr -dc 0-9)"
+  echo "unpacked=$([ -x $F/opt/ccrd/desktop-on.sh ] && echo yes || echo no) mounts=$(grep -c " $F/" /proc/mounts)"
+  up=""; for x in Xvfb xfce4-session selkies tailscaled pulseaudio; do pgrep -f "$x" >/dev/null && up="$up $x=up" || up="$up $x=DOWN"; done; echo "running:$up"
+  echo "tailscale: $($TS status >/dev/null 2>&1 && echo "signed in as $($TS ip -4 2>/dev/null)" || echo "not signed in")"
+  echo "desktop_page=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:6081/)"
+  for l in xvfb xfce selkies tsd; do m=$(grep -iE "error|fatal|cannot|denied|fail" $R/tmp/$l.log 2>/dev/null | tail -1 | cut -c1-150); [ -n "$m" ] && echo "$l.log: $m"; done
+  m=$(grep -iE "error|fail|couldn|NOT UP" $R/start.log 2>/dev/null | tail -1 | cut -c1-150); [ -n "$m" ] && echo "start.log: $m"
+  return 0
+}
+case "$1" in stop) stop; echo stopped; exit 0;; status) status; exit;; report) report; exit 0;; esac
 
 # ---- Get the image (first time, or --update) ---------------------------------------------------------------
 if [ ! -x $F/opt/ccrd/desktop-on.sh ] || [ "$1" = --update ]; then
