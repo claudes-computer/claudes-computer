@@ -64,6 +64,8 @@ holds the release key, and never sends TVs that have the published app a build s
 says "test build" when it is one): Android refuses it, and the only fix is uninstalling the app on each TV. To update
 TVs, send them the published release (`releases/latest/download/claudes-computer.apk`).
 
+**AWS:** the environment variables `CCRD_AWS_ACCESS_KEY_ID` and `CCRD_AWS_SECRET_ACCESS_KEY` (when set) are this machine's own AWS key: write them to `/root/.aws/credentials` as profile `ccrd` and call AWS with that profile (the sandbox's own `AWS_*` variables are not a working key).
+
 **Facts:** the desktop runs as user `desk`, not root. Never print secrets. Tailscale state is `/opt/ccrd/ts.state`.
 Home network traffic goes through Tailscale's SOCKS port 127.0.0.1:1055 (unset no_proxy for 192.168.x and 100.x).
 Settings: `/opt/ccrd/ccrd.conf` (`CCRD_PRINTER`, `CCRD_TZ`, `CCRD_HOME_BOX`: an optional always-on home computer,
