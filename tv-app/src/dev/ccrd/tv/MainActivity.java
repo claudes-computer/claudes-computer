@@ -135,6 +135,7 @@ public class MainActivity extends Activity implements Runnable {
 
     @Override protected void onPause() { super.onPause(); pausedAt = System.currentTimeMillis(); resumed = false; }
     private boolean resumed = false;
+    @Override protected void onNewIntent(android.content.Intent i) { super.onNewIntent(i); setIntent(i); }
     boolean inFront() { return resumed; }
 
     // ---- "Off" that keeps the TV awake (TvInfo helper action "blank") -------------------------------------
@@ -232,6 +233,12 @@ public class MainActivity extends Activity implements Runnable {
     @Override protected void onResume() {
         super.onResume();
         resumed = true;
+        // Testing (adb on): "am start --es blank on|off" switches the "off" that keeps the TV awake, as Claude does
+        // over the private network, so the TV lab can test it on emulators that aren't on a tailnet.
+        if (devMode() && getIntent().getStringExtra("blank") != null) {
+            if ("off".equals(getIntent().getStringExtra("blank"))) unblank(); else blankOn();
+            getIntent().removeExtra("blank");
+        }
         if (opened && pausedAt > 0 && System.currentTimeMillis() - pausedAt > 10000) web.reload();
         if (!opened) { shown = ""; handler.post(this); }
     }

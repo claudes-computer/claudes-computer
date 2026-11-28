@@ -42,6 +42,28 @@ if alive; then say "open: ok"; else
 fi
 say "in front: $(sh dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity' | grep -o '[a-z.]*/[A-Za-z.]*' | head -1)"
 
+# 1b. "Off" that keeps the TV awake (helper action blank): black screen, TV still awake; a button brings it back.
+say "--- blank (off that stays awake)"
+# Average brightness 0-255 from a raw screencap (no image library needed): width, height, format, then RGBA pixels.
+bright(){ shot "$1"; adb exec-out screencap > "$OUT/$1.raw" 2>/dev/null; python3 - "$OUT/$1.raw" <<'PY'
+import struct, sys
+d = open(sys.argv[1], "rb").read(); w, h = struct.unpack("<II", d[:8]); n = w * h * 4
+off = len(d) - n if len(d) >= n else 12
+px = d[off:off + n]; step = max(4, (len(px) // 4 // 4000) * 4)
+v = [sum(px[i:i + 3]) // 3 for i in range(0, len(px) - 3, step)]
+print(sum(v) // max(1, len(v)))
+PY
+rm -f "$OUT/$1.raw"; }
+before=$(bright 1b-before)
+sh am start -n $PKG/dev.ccrd.tv.MainActivity --es blank on >/dev/null; sleep 4
+during=$(bright 1b-blank)
+awake=$(sh dumpsys power | grep -m1 -o 'mWakefulness=[A-Za-z]*')
+sh input keyevent DPAD_CENTER; sleep 3
+after=$(bright 1b-after)
+say "blank: brightness before=$before during=$during after-button=$after, $awake"
+if [ -n "$during" ] && [ "$during" -le 3 ] && [ "$awake" = mWakefulness=Awake ] && [ "${after:-0}" -gt "$during" ]; then say "blank: ok"
+else say "blank: FAILED"; FAIL=1; fi
+
 # 2. The settings the helper setup applies (cloud/tv-helper-setup.sh tune): do the commands work on this Android?
 say "--- tune commands"
 say "pairing expiry: $(sh settings put global adb_allowed_connection_time 0; sh settings get global adb_allowed_connection_time)"
