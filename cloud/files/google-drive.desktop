@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Drive
+Comment=Google Drive
+Exec=/opt/ccrd/chrome.sh https://drive.google.com
+Icon=/usr/share/icons/Mint-Y/apps/256/google-drive.png
+Categories=Network;

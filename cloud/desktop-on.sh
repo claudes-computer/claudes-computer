@@ -102,6 +102,12 @@ pgrep -x cupsd >/dev/null || /usr/sbin/cupsd 2>/dev/null
   install -o $U -g $U -m 755 /usr/share/applications/ccrd-send.desktop $H/Desktop/ccrd-send.desktop
   mkdir -p $H/.config && touch $H/.config/ccrd-send-icon && chown $U: $H/.config/ccrd-send-icon; rm -f /run/ccrd-icons-trusted; }
 
+# Google Drive sits in the top-right corner of the desktop, put there once (moving or deleting it afterwards sticks).
+[ -f /usr/share/applications/ccrd-google-drive.desktop ] && [ ! -f $H/.config/ccrd-drive-icon ] && [ -d $H/Desktop ] && {
+  install -o $U -g $U -m 755 /usr/share/applications/ccrd-google-drive.desktop $H/Desktop/google-drive.desktop
+  mkdir -p $H/.config && touch $H/.config/ccrd-drive-icon && chown $U: $H/.config/ccrd-drive-icon; rm -f /run/ccrd-icons-trusted
+  (sleep 8; /opt/ccrd/icon-top-right.sh $H/Desktop/google-drive.desktop) >/dev/null 2>&1 & }
+
 # Desktop icons must be executable and carry XFCE's "trusted" mark (a Drive restore can drop both), or opening one asks about an "Untrusted application launcher".
 # The mark can be lost when the machine restarts, so set it again once per boot (in the desktop's own session).
 [ -f /run/ccrd-icons-trusted ] || (touch /run/ccrd-icons-trusted; for i in $(seq 1 15); do
