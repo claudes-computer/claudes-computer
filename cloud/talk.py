@@ -13,21 +13,27 @@
 Port 6085 listens on this machine only; Tailscale (userspace networking) hands it connections from the tailnet,
 the same way as the desktop stream on 6081. Outgoing requests go through Tailscale's SOCKS port 1055.
 """
-import http.server, json, os, re, socketserver, subprocess, sys, time, urllib.parse
+import http.server, json, os, re, socket, socketserver, subprocess, sys, time, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
 D = "/opt/ccrd"
 PORT = 6085
-TS = [f"{D}/tailscale", f"--socket={D}/ts.sock"]
-SOCKS = "127.0.0.1:1055"
-LOG = "/home/desk/.local/share/ccrd/received.txt"
+# On a desktop these defaults fit. On any other machine with Tailscale (a home computer with its own Claude):
+#   TALK_TS=tailscale TALK_SOCKS= TALK_BIND=<its tailnet address> talk.py serve
+TS = os.environ.get("TALK_TS", f"{D}/tailscale --socket={D}/ts.sock").split()
+SOCKS = os.environ.get("TALK_SOCKS", "127.0.0.1:1055")
+BIND = os.environ.get("TALK_BIND", "127.0.0.1")
+DESK = os.path.isdir("/home/desk") and os.path.exists(f"{D}/chrome.sh")
+LOG = "/home/desk/.local/share/ccrd/received.txt" if DESK else os.path.expanduser("~/.local/share/ccrd/received.txt")
 
 
 def me():
     try:
-        return subprocess.run([f"{D}/computer-name.sh"], capture_output=True, text=True, timeout=5).stdout.strip() or "ccrd"
+        if DESK:
+            return subprocess.run([f"{D}/computer-name.sh"], capture_output=True, text=True, timeout=5).stdout.strip() or "ccrd"
+        return json.loads(subprocess.run(TS + ["status", "--self", "--json"], capture_output=True, text=True, timeout=5).stdout)["Self"]["HostName"]
     except Exception:
-        return "ccrd"
+        return socket.gethostname()
 
 
 def desk_env():
@@ -68,11 +74,21 @@ def receive(text, sender):
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, "a") as f:
         f.write(f"{time.strftime('%Y-%m-%d %H:%M')} from {sender}: {text}\n")
+    if not DESK:   # a home computer: the inbox file is the message (its Claude reads it); a notice if a screen is on
+        subprocess.run(["notify-send", f"From {sender}", text[:200]], capture_output=True)
+        return "in the inbox (" + LOG + ")"
     try:
         os.system(f"chown -R desk: {os.path.dirname(LOG)} 2>/dev/null")
     except Exception:
         pass
-    as_desk(["xclip", "-selection", "clipboard"], stdin=text.encode())
+    # xclip stays running to hold the clipboard: start it and don't wait, or the sender times out.
+    try:
+        pre = [] if os.geteuid() == _uid("desk") else ["runuser", "-u", "desk", "--"]
+        x = subprocess.Popen(pre + ["env", "-i"] + [f"{k}={v}" for k, v in desk_env().items()] + ["xclip", "-selection", "clipboard"],
+                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        x.stdin.write(text.encode()); x.stdin.close()
+    except Exception:
+        pass
     if is_link:
         as_desk([f"{D}/chrome.sh", text.strip()], wait=False)
     short = text if len(text) < 200 else text[:200] + "…"
@@ -131,12 +147,12 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def serve():
-    Server(("127.0.0.1", PORT), Handler).serve_forever()
+    Server((BIND, PORT), Handler).serve_forever()
 
 
 # ---- Talking to the others ---------------------------------------------------------------------------------
 def curl(url, data=None, timeout=6, headers=()):
-    cmd = ["curl", "-s", "-m", str(timeout), "--socks5-hostname", SOCKS, url]
+    cmd = ["curl", "-s", "-m", str(timeout)] + (["--socks5-hostname", SOCKS] if SOCKS else []) + [url]
     for h in headers:
         cmd += ["-H", h]
     if data is not None:
@@ -150,7 +166,7 @@ def curl(url, data=None, timeout=6, headers=()):
 
 
 def peers():
-    """Online devices of the same Tailscale user that serve the desktop stream (port 6081), this one excluded."""
+    """Online devices of the same Tailscale user that serve the desktop stream (port 6081) or the talk service, this one excluded."""
     try:
         st = json.loads(subprocess.run(TS + ["status", "--json"], capture_output=True, text=True, timeout=10).stdout)
     except Exception:
@@ -162,11 +178,11 @@ def peers():
 
     def probe(p):
         ip = p["TailscaleIPs"][0]
-        rc, _ = curl(f"http://{ip}:6081/", timeout=4)
-        if rc != 0:
-            return None
         rc, hello = curl(f"http://{ip}:{PORT}/hello", timeout=4)
-        return {"name": p.get("HostName", ip), "ip": ip, "talk": rc == 0 and '"talk"' in hello}
+        talk = rc == 0 and '"talk"' in hello
+        if not talk and curl(f"http://{ip}:6081/", timeout=4)[0] != 0:
+            return None      # neither a desktop nor a machine with the talk service
+        return {"name": p.get("HostName", ip), "ip": ip, "talk": talk}
 
     with ThreadPoolExecutor(16) as ex:
         found = [x for x in ex.map(probe, cand) if x]
