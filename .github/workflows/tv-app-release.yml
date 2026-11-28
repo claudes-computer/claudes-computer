@@ -1,8 +1,7 @@
 # Builds the TV app and publishes it as a GitHub release. Runs only when started by hand (Actions -> TV app release ->
-# Run workflow): releases are usually made with the APK built and signed on the desktop, and a run on every tag would
-# race those. The signed APK is what TVs accept as an update; see the signing note below.
-# Signing: add repository secrets TV_KEYSTORE_B64 (base64 of the keystore) and TV_KS_PASS. Without them the
-# build makes a throwaway key, and a TV that has an earlier build must uninstall it before installing this one.
+# Run workflow). This is the ONLY way releases are made: no person or Claude session signs one.
+# Signing: repository secrets TV_KEYSTORE_B64 (base64 of the keystore) and TV_KS_PASS. Without them, or with a key
+# whose certificate isn't tv-app/RELEASE_CERT.sha256, the run fails: TVs refuse updates signed with another key.
 name: TV app release
 on:
   workflow_dispatch:
@@ -32,11 +31,12 @@ jobs:
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
             echo "KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
           else
-            echo "::warning::No TV_KEYSTORE_B64 secret: signing with a throwaway key."
+            echo "::error::No TV_KEYSTORE_B64 secret: refusing to build a release with any other key."; exit 1
           fi
       - name: Build
         env:
           KS_PASS: ${{ secrets.TV_KS_PASS }}
+          RELEASE: "1"     # build.sh refuses any key whose certificate isn't tv-app/RELEASE_CERT.sha256
         run: bash tv-app/build.sh
       - name: Release
         if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''

@@ -51,9 +51,15 @@ if [ -z "$KEYSTORE" ] && [ -n "$APP_ID" ] && [ -f "$B/keystore-$APP_ID.jks" ]; t
 elif [ -z "$KEYSTORE" ] && [ -n "$APP_ID" ]; then
   echo "no key for $APP_ID (build/keystore-$APP_ID.jks): its TVs would refuse this build" >&2; exit 1
 fi
+# RELEASE=1 (the GitHub release workflow): only the real release key, given as KEYSTORE; never make one.
+if [ "$RELEASE" = 1 ] && { [ -z "$KEYSTORE" ] || [ ! -f "$KEYSTORE" ]; }; then
+  echo "RELEASE=1 needs the release key in KEYSTORE (the TV_KEYSTORE_B64 secret); refusing to sign with another" >&2; exit 1
+fi
 if [ -z "$KEYSTORE" ]; then
   KEYSTORE=$B/release.keystore
   if [ ! -f "$KEYSTORE" ]; then
+    echo "NOTE: no signing key here, so this makes a new local one. A build signed with it is for testing only:" >&2
+    echo "TVs that installed the published app refuse it as an update. Releases are signed only by GitHub." >&2
     head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$B/keystore.pass"
     keytool -genkeypair -keystore "$KEYSTORE" -storepass "$(cat "$B/keystore.pass")" -alias app -keyalg RSA \
       -keysize 2048 -validity 20000 -dname "CN=Claude's Computer" >/dev/null 2>&1
@@ -95,4 +101,9 @@ cd out && cp base.apk unsigned.apk && zip -q -j unsigned.apk dex/classes.dex
 mkdir -p apk/lib && cp -r ../libs/jni/* apk/lib/ && (cd apk && zip -q -r ../unsigned.apk lib)
 $BT/zipalign -f -p 4 unsigned.apk aligned.apk
 $BT/apksigner sign --ks "$KEYSTORE" --ks-pass pass:"$KS_PASS" --out claudes-computer${APP_ID:+-$APP_ID}.apk aligned.apk
+CERT=$($BT/apksigner verify --print-certs claudes-computer${APP_ID:+-$APP_ID}.apk 2>/dev/null | awk '/certificate SHA-256 digest/{print $NF; exit}')
+if [ "$RELEASE" = 1 ] && [ "$CERT" != "$(cat "$HERE/RELEASE_CERT.sha256")" ]; then
+  echo "signed with the wrong key ($CERT), not the release key in tv-app/RELEASE_CERT.sha256: not releasing" >&2; exit 1
+fi
+[ "$CERT" = "$(cat "$HERE/RELEASE_CERT.sha256")" ] || echo "NOTE: test build (not the release key): don't send it to TVs that have the published app" >&2
 echo "built: $(pwd)/claudes-computer${APP_ID:+-$APP_ID}.apk (build $BUILD)"

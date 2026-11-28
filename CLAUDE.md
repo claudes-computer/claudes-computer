@@ -89,10 +89,11 @@ opens a Chrome window there without taking over the person's screen. Start Chrom
 `cloud/ccrd up` runs the desktop the way they allow, `cloud/ccrd report` gives 8 lines to paste. Not for this
 machine's own desktop: "desktop on" above is that.
 
-**Signing keys:** the TV app's key (`tv-app/build/release.keystore`, `keystore.pass`, and `keystore-<app id>.*`) must
-never exist on only one machine: this machine is wiped when its session is archived. After a build creates or changes a
-key, copy it to the home box (`umask 077`, `~/.config/ccrd/tv-keys/`) and compare sha256 on both ends; before a build on a
-fresh machine, copy it back from there. Never print key contents.
+**Signing keys:** releases are made only by GitHub (Actions → TV app release), which signs with the repository
+secret and refuses any key whose certificate isn't `tv-app/RELEASE_CERT.sha256`. A session never signs a release, never
+holds the release key, and never sends TVs that have the published app a build signed with another key (`build.sh`
+says "test build" when it is one): Android refuses it, and the only fix is uninstalling the app on each TV. To update
+TVs, send them the published release (`releases/latest/download/claudes-computer.apk`).
 
 **Facts:** the desktop runs as user `desk`, not root. Never print secrets. Tailscale state is `/opt/ccrd/ts.state`.
 Home network traffic goes through Tailscale's SOCKS port 127.0.0.1:1055 (unset no_proxy for 192.168.x and 100.x).
