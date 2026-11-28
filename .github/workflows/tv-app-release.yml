@@ -37,6 +37,7 @@ jobs:
         env:
           KS_PASS: ${{ secrets.TV_KS_PASS }}
           RELEASE: "1"     # build.sh refuses any key whose certificate isn't tv-app/RELEASE_CERT.sha256
+          VERSION: ${{ inputs.version }}
         run: bash tv-app/build.sh
       - name: Release
         if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''

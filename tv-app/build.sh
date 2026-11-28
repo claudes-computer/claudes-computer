@@ -73,6 +73,7 @@ fi
 # only with a release. The TV reports both.
 T=$(cd "$HERE" && { git diff --quiet HEAD -- . ../helper 2>/dev/null && git log -1 --format=%ct 2>/dev/null; } || date +%s)
 BUILD=$(( (T - 1767225600) / 60 ))
+# VERSION=1.1-alpha (the release workflow): the name the TV shows; otherwise the manifest's.
 # The app
 BT=$B/build-tools; JAR=$B/sdk/platforms/android-34/android.jar; LIB=$HERE/libs/ccrdnet-classes.jar
 cd "$HERE"; rm -rf out && mkdir -p out/gen out/classes out/dex out/apk
@@ -93,7 +94,7 @@ case "$ABIS" in *386*|*amd64*) ;; *) mkdir -p $HO/lib && cp -r $H/jniLibs/armeab
 $BT/zipalign -f -p 4 $HO/unsigned.apk $HO/aligned.apk
 $BT/apksigner sign --ks "$KEYSTORE" --ks-pass pass:"$KS_PASS" --out out/assets/helper.apk $HO/aligned.apk || { echo "helper build failed"; exit 1; }
 rm -f out/assets/helper.apk.idsig
-$BT/aapt2 link -I $JAR --manifest $MAN -A out/assets -o out/base.apk out/res.zip --java out/gen --min-sdk-version 21 --target-sdk-version 28 --version-code $BUILD --replace-version
+$BT/aapt2 link -I $JAR --manifest $MAN -A out/assets -o out/base.apk out/res.zip --java out/gen --min-sdk-version 21 --target-sdk-version 28 --version-code $BUILD ${VERSION:+--version-name "$VERSION"} --replace-version
 javac -nowarn -source 8 -target 8 -bootclasspath $JAR -cp $LIB -d out/classes $(find src out/gen -name '*.java') 2>&1 | grep -v "^warning" || true
 [ -f out/classes/dev/ccrd/tv/MainActivity.class ] || { echo "Java compile failed; no app built."; exit 1; }
 $BT/d8 --lib $JAR --min-api 21 --output out/dex $(find out/classes -name '*.class') $LIB
