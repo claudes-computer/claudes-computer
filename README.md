@@ -29,7 +29,6 @@ it. No PC to buy, no extra monthly bill. Plug in a cheap keyboard and mouse.
               Open the sign-in link Claude gives you and approve the computer.
               The desktop opens on the TV by itself.
 3. Then       Tailscale: approve the TV's "exit node" and "home network" in the admin console.
-              Claude: say "set up the helper" (updates and repairs without touching the TV).
 ```
 
 ![The TV app while the computer is asleep](docs/media/tv-asleep.png)
@@ -59,38 +58,20 @@ Tailscale sign-in link: open it and approve. The desktop opens on the TV by itse
 **Edit route settings**, and turn on **use as exit node** and your **home network**. The computer then browses
 through your home internet, and Claude can reach your home network when you ask it to.
 
-**Then, in Claude.** Say **set up the helper**. Claude tells you what to press on the TV; the table under
-[Permissions on the TV](#permissions-on-the-tv) says what each permission is for.
-
 ## Using it
 
 - **Waking it:** the computer sleeps when nobody is watching. Say **desktop on** in your session; the TV opens the
   desktop by itself. To wake it from the TV without a phone, ask Claude to "set up waking from the TV" (a 4-digit PIN).
 - **Claude is the handyman.** It installs and fixes things when you ask in your session. It isn't watching while you
   use the desktop. For a real repair, switch the chat to Opus (model menu next to the message box).
-- **Updating the TV app:** ask Claude to "update the TVs". The new version travels to every TV that's on. With the
-  helper set up (below) it installs and reopens by itself; otherwise Android asks on the TV: move to **Install**, OK.
+- **Updating the TV app:** ask Claude to "update the TVs". The new version travels to every TV that's on, and
+  Android asks on the TV: move to **Install**, OK. With a home computer on the same Wi-Fi (Experimental, below),
+  Claude installs it without anyone at the TV.
 - **Music keeps playing** when you leave the app for the TV's home screen, until another app plays sound.
 - **Two workspaces:** the switch in the bar flips between **Yours** and **Claude's**. Claude works in its own, so it
   never takes over your screen; peek in any time.
 - **Extras** (ask Claude): back up your files to Google Drive, keep your browser logins (encrypted), a home network
   check-up, use the desktop from a laptop or phone.
-
-## Permissions on the TV
-
-Ask Claude to "set up the helper". Claude leads: it requests each permission this TV supports, skips the ones it
-doesn't, tells you what to press, and lists at the end what this TV can and can't do. On Android 11 or newer it asks
-for wireless debugging (5) right after the helper is installed, because with it Claude grants 3 and 4 itself.
-
-| Permission | What it does, and why it's needed | Available on |
-|---|---|---|
-| **1. Install unknown apps** (for Claude's Computer) | Lets the app install its own updates and the helper app. Android requires this for any app that installs apps outside the Play Store. | All Android TV and Google TV |
-| **2. Install the helper app** | A second, small app that keeps working while the main app updates or isn't running. Needed because an app can't press buttons or reopen itself during its own update. | All Android TV and Google TV |
-| **3. VPN connection** (for the helper) | Creates a local network interface inside the helper. The TV accepts remote-control commands only from other devices; this interface lets the helper's commands reach the TV as if from another device. No traffic leaves the TV. | All Android TV and Google TV |
-| **4. Pair the helper as a remote** (6-character code on the TV) | Authorizes the helper as a remote control. With 1–4, Claude can turn the TV on and off, press any button and install updates without anyone pressing Install, and the helper reopens the app after an update or a crash. | TVs with the Google TV remote service (most Android TV and Google TV; if the TV pairs with the Google TV app on a phone, it has it) |
-| **5. Wireless debugging** (Developer options → Wireless debugging → Pair device with pairing code) | Gives Claude a command line on the TV: silent installs, system settings, screenshots of any app, logs, and turning off preinstalled apps or ads you choose (every change is listed and can be undone). Turns off when the TV restarts; turn it on again in Settings, no new pairing. | Android 11 or newer |
-
-Without the helper, everything else works; updates then need someone to press Install on the TV.
 
 ## Experimental
 
@@ -101,6 +82,8 @@ These work, but they're rougher, and nothing here is needed. Ask Claude for any 
   - **The house's fast lane:** the TV can carry the connection itself through your router, instead of a relay far
     away. It tries this on its own when the router allows it (NAT-PMP, which many routers have off).
   - **No Tailscale sign-in on a fresh computer:** ask Claude to "skip the sign-in next time".
+- **A home computer** that stays on (Linux, Mac, or Windows with Ubuntu): ask Claude to "set up my home computer".
+  With the TV's debugging turned on, Claude installs updates and reopens the app from there, without anyone at the TV.
 - **The desktop as a Docker image**, for a machine where you can run Docker but aren't root (some other agents'
   cloud machines), or any Linux box: `docker run -d --name ccrd --shm-size=2g -v ccrd-state:/state -v ccrd-home:/home/desk ghcr.io/claudes-computer/claudes-computer`,
   then `docker logs -f ccrd` for the Tailscale sign-in link. Settings and proxy notes are at the top of the
@@ -120,6 +103,25 @@ These work, but they're rougher, and nothing here is needed. Ask Claude for any 
 
 **Coming soon:** more than one computer, managed from the TV: start a new one, name it, archive it, switch between
 them.
+
+### The TV helper (experimental)
+
+Optional, and not needed for anything above. It has been unreliable on some TVs, so set it up only if you want to
+experiment.
+
+Ask Claude to "set up the helper". Claude leads: it requests each permission this TV supports, skips the ones it
+doesn't, tells you what to press, and lists at the end what this TV can and can't do. On Android 11 or newer it asks
+for wireless debugging (5) right after the helper is installed, because with it Claude grants 3 and 4 itself.
+
+| Permission | What it does, and why it's needed | Available on |
+|---|---|---|
+| **1. Install unknown apps** (for Claude's Computer) | Lets the app install its own updates and the helper app. Android requires this for any app that installs apps outside the Play Store. | All Android TV and Google TV |
+| **2. Install the helper app** | A second, small app that keeps working while the main app updates or isn't running. Needed because an app can't press buttons or reopen itself during its own update. | All Android TV and Google TV |
+| **3. VPN connection** (for the helper) | Creates a local network interface inside the helper. The TV accepts remote-control commands only from other devices; this interface lets the helper's commands reach the TV as if from another device. No traffic leaves the TV. | All Android TV and Google TV |
+| **4. Pair the helper as a remote** (6-character code on the TV) | Authorizes the helper as a remote control. With 1–4, Claude can turn the TV on and off, press any button and install updates without anyone pressing Install, and the helper reopens the app after an update or a crash. | TVs with the Google TV remote service (most Android TV and Google TV; if the TV pairs with the Google TV app on a phone, it has it) |
+| **5. Wireless debugging** (Developer options → Wireless debugging → Pair device with pairing code) | Gives Claude a command line on the TV: silent installs, system settings, screenshots of any app, logs, and turning off preinstalled apps or ads you choose (every change is listed and can be undone). Turns off when the TV restarts; turn it on again in Settings, no new pairing. | Android 11 or newer |
+
+Without the helper, everything else works; updates then need someone to press Install on the TV.
 
 ## It's Claude's house
 

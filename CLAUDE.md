@@ -49,14 +49,15 @@ addresses are private: never put them in this repository.
   box: `/opt/ccrd/tv-open.sh` opens the app on the TVs at home as a paired remote, through the home box. Once per TV:
   `tv-open.sh find`, `tv-open.sh pair <address>`, then `tv-open.sh code <address> <code on the TV>`. `tv-update.sh`
   does this by itself when no TV answers.
-- **Before asking a person to touch a TV, try every route, in this order:** the app (port 6084) → the helper
-  (`/tv/helper`) → the home box (`tv-open.sh`; adb from the box for a TV with network debugging) → the other TV as
-  the way into the home network (SOCKS port, when its app is open) → only then the person. Check `tailscale status`
+- **Before asking a person to touch a TV, try every route, in this order:** the app (port 6084) → adb from the home
+  box (`tailscale ssh $CCRD_HOME_BOX`, then `adb connect <TV LAN IP>:5555`; it installs, presses keys, screenshots and
+  changes settings, and is the route that has proved reliable) → the other TV as the way into the home network → only
+  then the person. Android refuses any software answering its "Allow USB debugging?" box: that one needs a real press. Check `tailscale status`
   for what is online first; a missing Claude session on a machine doesn't mean the machine is unreachable.
 - Optional, only if the user has a home box and turned on the TV's debugging: adb from `CCRD_HOME_BOX` (it's on
   the home Wi-Fi, so not the home route) can press keys, restart or reinstall the app; a Wake-on-LAN packet sent
   from there turns on a TV with Remote start on. Without them, everything above still works.
-- **"Set up the helper"** (a second small app inside the TV app: hands-free updates, reopening the app after an
+- **"Set up the helper"** (experimental, off by default: it has been unreliable; prefer adb from the home box) (a second small app inside the TV app: hands-free updates, reopening the app after an
   update or a crash, power, buttons; on Android 11+ also a command line on the TV): run
   `/opt/ccrd/tv-helper-setup.sh`. Each run does what it can, then prints the one thing the person must do on the TV
   (lines starting "ON THE TV"): tell them exactly that, wait, run it again. It ends with what this TV can and can't
@@ -87,6 +88,11 @@ opens a Chrome window there without taking over the person's screen. Start Chrom
 **Other agents' machines** (Codex, Muse, ...): `cloud/ccrd doctor` names the machine's walls with evidence,
 `cloud/ccrd up` runs the desktop the way they allow, `cloud/ccrd report` gives 8 lines to paste. Not for this
 machine's own desktop: "desktop on" above is that.
+
+**Signing keys:** the TV app's key (`tv-app/build/release.keystore`, `keystore.pass`, and `keystore-<app id>.*`) must
+never exist on only one machine: this machine is wiped when its session is archived. After a build creates or changes a
+key, copy it to the home box (`umask 077`, `~/.config/ccrd/tv-keys/`) and compare sha256 on both ends; before a build on a
+fresh machine, copy it back from there. Never print key contents.
 
 **Facts:** the desktop runs as user `desk`, not root. Never print secrets. Tailscale state is `/opt/ccrd/ts.state`.
 Home network traffic goes through Tailscale's SOCKS port 127.0.0.1:1055 (unset no_proxy for 192.168.x and 100.x).
