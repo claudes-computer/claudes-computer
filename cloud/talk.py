@@ -20,8 +20,10 @@ D = "/opt/ccrd"
 PORT = 6085
 # On a desktop these defaults fit. On any other machine with Tailscale (a home computer with its own Claude):
 #   TALK_TS=tailscale TALK_SOCKS= TALK_BIND=<its tailnet address> talk.py serve
-TS = os.environ.get("TALK_TS", f"{D}/tailscale --socket={D}/ts.sock").split()
-SOCKS = os.environ.get("TALK_SOCKS", "127.0.0.1:1055")
+# A cloud machine runs its own userspace Tailscale (reached through SOCKS); any other machine uses its normal one.
+CLOUD = os.path.exists(f"{D}/tailscale")
+TS = os.environ.get("TALK_TS", f"{D}/tailscale --socket={D}/ts.sock" if CLOUD else "tailscale").split()
+SOCKS = os.environ.get("TALK_SOCKS", "127.0.0.1:1055" if CLOUD else "")
 BIND = os.environ.get("TALK_BIND", "127.0.0.1")
 DESK = os.path.isdir("/home/desk") and os.path.exists(f"{D}/chrome.sh")
 LOG = "/home/desk/.local/share/ccrd/received.txt" if DESK else os.path.expanduser("~/.local/share/ccrd/received.txt")

@@ -6,10 +6,13 @@
    reason from the end of the log in one line (network unreachable: set the environment's network access to Full).
 2. Run `/opt/ccrd/desktop-on.sh` with a 5-minute timeout. Its last line says whether the desktop is on Tailscale.
    If not signed in, run `/opt/ccrd/tailscale-up.sh` in the background and give the user the link it prints.
-3. Start `/opt/ccrd/keepawake.sh` in the background (timeout 7200000).
+3. Start `/opt/ccrd/keepawake.sh` and `/opt/ccrd/inbox-watch.sh` in the background (timeout 7200000 each).
 4. Reply in one short line, no questions: the user is at a TV.
 
 **keepawake.sh finishes:** `IDLE` means nobody is watching: do nothing. `REARM: viewers=N`: start it again.
+**inbox-watch.sh finishes:** `INBOX:` lines are messages another machine or Claude session sent here with `talk send ccrd "..."`
+(sessions can't reply to this one directly: it only takes messages from the person's trusted devices). Act on them, then start it again;
+`REARM`: start it again. On a home computer, `talk` is `TALK_TS=tailscale TALK_SOCKS= talk.py` (the default when it has no /opt/ccrd).
 
 **Something broken that this file doesn't cover:** try desktop-on.sh once more and read the log it names. If that
 doesn't fix it, don't improvise changes. Say plainly what's wrong and: "For a fix like this, switch this chat to
