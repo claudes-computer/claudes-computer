@@ -38,6 +38,7 @@ class TvInfo implements ccrdnet.TVInfo {
             android.os.PowerManager pm = (android.os.PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
             j.put("screen_on", pm != null && pm.isInteractive());
             j.put("showing", act.showing());
+            j.put("blanked", act.blanked());
             j.put("computer", act.host());
             j.put("microphone_on", act.micOn());
             j.put("up_minutes", android.os.SystemClock.elapsedRealtime() / 60000);
@@ -98,7 +99,24 @@ class TvInfo implements ccrdnet.TVInfo {
 
     // Updates and the repair helper: Updater.java.
     @Override public String installUpdate(String path) { return updater.installUpdate(path); }
-    @Override public String helper(String action, String arg) { return updater.helper(action, arg); }
+    @Override public String helper(String action, String arg) {
+        if ("blank".equals(action)) return blank(!"off".equals(arg));
+        return updater.helper(action, arg);
+    }
+
+    /** "Off" that keeps the TV awake (MainActivity.blankOn): brings the app to the front first if it isn't. */
+    private String blank(final boolean on) {
+        if (on && !act.inFront()) {
+            if (!HelperLink.installed(ctx)) return "the app isn't in front and there's no helper to open it";
+            HelperLink.call(ctx, HelperLink.KEYS, "link:claudescomputer://open", 30);
+            for (int i = 0; i < 30 && !act.inFront(); i++) { try { Thread.sleep(200); } catch (InterruptedException e) { break; } }
+            if (!act.inFront()) return "couldn't bring the app to the front";
+        }
+        final CountDownLatch done = new CountDownLatch(1);
+        main.post(new Runnable() { public void run() { if (on) act.blankOn(); else act.unblank(); done.countDown(); } });
+        try { done.await(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+        return on ? "blank: picture off, TV awake" : "blank off: picture back";
+    }
 
     @Override public void notice(final String what) {
         main.post(new Runnable() { public void run() { act.claudeNotice(what); } });

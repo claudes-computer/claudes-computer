@@ -133,7 +133,39 @@ public class MainActivity extends Activity implements Runnable {
     private static boolean extrasStarted = false;
     private long pausedAt = 0;
 
-    @Override protected void onPause() { super.onPause(); pausedAt = System.currentTimeMillis(); }
+    @Override protected void onPause() { super.onPause(); pausedAt = System.currentTimeMillis(); resumed = false; }
+    private boolean resumed = false;
+    boolean inFront() { return resumed; }
+
+    // ---- "Off" that keeps the TV awake (TvInfo helper action "blank") -------------------------------------
+    // Some TVs (the Sony A95L) turn their Wi-Fi off a few minutes into standby, and then nothing can turn them on
+    // again from the network. So "off" from Claude shows pure black (on an OLED the pixels are off), dims the
+    // backlight and mutes the sound, while the TV stays awake and reachable. Any button, or "blank off", undoes it.
+    private android.view.View blank;
+    private int mutedFrom = -1;
+    void blankOn() {
+        if (blank != null) return;
+        blank = new android.view.View(this);
+        blank.setBackgroundColor(0xFF000000);
+        root.addView(blank, new android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+        WindowManager.LayoutParams lp = getWindow().getAttributes(); lp.screenBrightness = 0f; getWindow().setAttributes(lp);
+        android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am != null && !am.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) {
+            am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0); mutedFrom = 1; }
+        android.util.Log.i("ClaudeDesktop", "blank on");
+    }
+    void unblank() {
+        if (blank == null) return;
+        root.removeView(blank); blank = null;
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE; getWindow().setAttributes(lp);
+        android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am != null && mutedFrom == 1) am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0);
+        mutedFrom = -1;
+        android.util.Log.i("ClaudeDesktop", "blank off");
+    }
+    boolean blanked() { return blank != null; }
 
     // ---- sound in the background, like a music app: leave the app and the desktop keeps playing, until another
     // app takes the speakers (Android's audio focus). Then the desktop steps aside and disconnects, so the
@@ -199,6 +231,7 @@ public class MainActivity extends Activity implements Runnable {
     /** Back from the home screen or the screensaver: the stream may have dropped while away, so reconnect. */
     @Override protected void onResume() {
         super.onResume();
+        resumed = true;
         if (opened && pausedAt > 0 && System.currentTimeMillis() - pausedAt > 10000) web.reload();
         if (!opened) { shown = ""; handler.post(this); }
     }
@@ -398,6 +431,11 @@ public class MainActivity extends Activity implements Runnable {
     @Override
     public boolean dispatchKeyEvent(KeyEvent ev) {
         int code = ev.getKeyCode();
+        // Blanked ("off" that keeps the TV awake): any button brings the picture back.
+        if (blank != null) {
+            if (ev.getAction() == KeyEvent.ACTION_UP) unblank();
+            return true;
+        }
         if (picker.showing()) {                                 // the computer picker is up: it takes the keys
             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
                 if (backHeld) { if (ev.getAction() == KeyEvent.ACTION_UP) backHeld = false; return true; }   // the hold that opened it
