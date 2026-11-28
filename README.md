@@ -44,7 +44,8 @@ it. No PC to buy, no extra monthly bill. Plug in a cheap keyboard and mouse.
 **On the TV.** Install **Downloader** (by AFTVnews) from the TV's store and let it install apps (Settings → Apps →
 Security & restrictions → Unknown sources). In Downloader, open
 `github.com/claudes-computer/claudes-computer/releases/latest/download/claudes-computer.apk`
-(always the newest; also on the [Releases](../../releases) page).
+(always the newest; also on the [Releases](../../releases) page). Installed it before 28 November 2026? That version
+can't be updated: uninstall it on the TV first (Settings → Apps → Claude's Computer → Uninstall), then install this one.
 Open **Claude's Computer** and scan the QR code: it opens Tailscale's sign-in on your phone, where you can also make
 the account. Connect the keyboard and mouse.
 
