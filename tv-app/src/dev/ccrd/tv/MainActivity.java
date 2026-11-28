@@ -140,8 +140,8 @@ public class MainActivity extends Activity implements Runnable {
 
     // ---- "Off" that keeps the TV awake (TvInfo helper action "blank") -------------------------------------
     // Some TVs (the Sony A95L) turn their Wi-Fi off a few minutes into standby, and then nothing can turn them on
-    // again from the network. So "off" from Claude shows pure black (on an OLED the pixels are off), dims the
-    // backlight and mutes the sound, while the TV stays awake and reachable. Any button, or "blank off", undoes it.
+    // again from the network. So "off" from Claude shows pure black (on an OLED the pixels are off) and mutes
+    // the sound (it never touches brightness), while the TV stays awake and reachable. Any button, or "blank off", undoes it.
     private android.view.View blank;
     private int mutedFrom = -1;
     void blankOn() {
@@ -150,16 +150,19 @@ public class MainActivity extends Activity implements Runnable {
         blank.setBackgroundColor(0xFF000000);
         root.addView(blank, new android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
-        WindowManager.LayoutParams lp = getWindow().getAttributes(); lp.screenBrightness = 0f; getWindow().setAttributes(lp);
         android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
         if (am != null && !am.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) {
             am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0); mutedFrom = 1; }
         android.util.Log.i("ClaudeDesktop", "blank on");
     }
     void unblank() {
+        // Always undo any brightness override, even when nothing is blanked (a build before this one left the
+        // screen at brightness 0 after the black screen was lifted).
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE; getWindow().setAttributes(lp);
         if (blank == null) return;
         root.removeView(blank); blank = null;
-        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp = getWindow().getAttributes();
         lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE; getWindow().setAttributes(lp);
         android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
         if (am != null && mutedFrom == 1) am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0);
