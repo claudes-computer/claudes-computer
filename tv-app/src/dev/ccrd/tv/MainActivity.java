@@ -253,6 +253,9 @@ public class MainActivity extends Activity implements Runnable {
             return;
         }
         if (!forwarding) { forwarding = Ccrdnet.forward(16082, DESKTOP).isEmpty(); }
+        // The TV's own service (report, updates, helper, "off" that keeps it awake) starts as soon as the TV is on
+        // the private network, not only after a desktop opens: with every desktop asleep, Claude still reaches the TV.
+        startExtras();
         if (!asleep) status("checking", "", "");
         probing = true;
         new Thread(new Runnable() { public void run() {
