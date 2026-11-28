@@ -64,7 +64,7 @@ holds the release key, and never sends TVs that have the published app a build s
 says "test build" when it is one): Android refuses it, and the only fix is uninstalling the app on each TV. To update
 TVs, send them the published release (`releases/latest/download/claudes-computer.apk`).
 
-**AWS:** the environment variables `CCRD_AWS_ACCESS_KEY_ID` and `CCRD_AWS_SECRET_ACCESS_KEY` (when set) are this machine's own AWS key: write them to `/root/.aws/credentials` as profile `ccrd` and call AWS with that profile (the sandbox's own `AWS_*` variables are not a working key).
+**AWS:** credential_process over Tailscale SSH to the home computer (`aws-temp --user claudes-computer` there hands out a 12-hour key). In `/root/.aws/config` `[default]`: `credential_process = /opt/ccrd/tailscale --socket=/opt/ccrd/ts.sock ssh <CCRD_HOME_BOX user@host> /home/drew/.local/bin/aws-temp --user claudes-computer`, `region = us-east-1`; call AWS with the sandbox's own `AWS_*` variables unset. Never store AWS keys in the environment or on this machine.
 
 **Facts:** the desktop runs as user `desk`, not root. Never print secrets. Tailscale state is `/opt/ccrd/ts.state`.
 Home network traffic goes through Tailscale's SOCKS port 127.0.0.1:1055 (unset no_proxy for 192.168.x and 100.x).
